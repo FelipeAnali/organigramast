@@ -26,26 +26,45 @@ const GPAL = [
 
 const NW=180, NH=168, NHG=52, GX=22, GY=40;
 const FOTO_SZ=84;
-const NHC=36; // v7: altura nodo compacto (modo lista)
-const GYC=6;  // v7: gap vertical entre nodos compactos apilados
+const NHC=36; // altura nodo compacto (modo lista)
+const GYC=6;  // gap vertical entre nodos compactos apilados
+
+/* v8: helper para obtener todos los padres de un nodo (soporta parentIds[] y parentId legacy) */
+function parentsOf(n){
+  if(!n) return [];
+  if(Array.isArray(n.parentIds) && n.parentIds.length>0) return n.parentIds.filter(Boolean);
+  if(n.parentId) return [n.parentId];
+  return [];
+}
+/* v8: jefe "primario" de un nodo — el primero de parentIds, o parentId */
+function primaryParentOf(n){
+  const ps=parentsOf(n);
+  return ps[0] || "";
+}
 
 function buildLayout(nodes, compactSet){
   compactSet = compactSet || new Set();
   if(!nodes.length) return {pos:{},W:600,H:300};
   const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
+  /* v8: ch usa el padre PRIMARIO para armar el árbol */
   const ch=Object.fromEntries(nodes.map(n=>[n.id,[]]));
   const roots=[];
-  nodes.forEach(n=>{ if(n.parentId&&byId[n.parentId]) ch[n.parentId].push(n.id); else roots.push(n.id); });
+  nodes.forEach(n=>{
+    const pp=primaryParentOf(n);
+    if(pp && byId[pp]) ch[pp].push(n.id);
+    else roots.push(n.id);
+  });
 
-  /* ¿este nodo está bajo un ancestro compactado? */
+  /* ¿este nodo está bajo un ancestro compactado? (via padre primario) */
   const compactAncestor={};
   const findCompactAnc=id=>{
     if(compactAncestor[id]!==undefined) return compactAncestor[id];
     const n=byId[id];
     if(!n) return compactAncestor[id]=null;
-    if(!n.parentId) return compactAncestor[id]=null;
-    if(compactSet.has(n.parentId)) return compactAncestor[id]=n.parentId;
-    return compactAncestor[id]=findCompactAnc(n.parentId);
+    const pp=primaryParentOf(n);
+    if(!pp) return compactAncestor[id]=null;
+    if(compactSet.has(pp)) return compactAncestor[id]=pp;
+    return compactAncestor[id]=findCompactAnc(pp);
   };
   nodes.forEach(n=>findCompactAnc(n.id));
 
@@ -56,15 +75,10 @@ function buildLayout(nodes, compactSet){
   };
 
   const memo={};
-  /* ancho del subárbol */
   const sw=id=>{
     if(memo[id]!==undefined) return memo[id];
     const c=ch[id]||[];
-    /* Si este nodo está en compactSet, todos sus hijos se apilan verticalmente: ancho = NW+GX */
-    if(compactSet.has(id) && c.length){
-      return memo[id]=NW+GX;
-    }
-    /* Si este nodo ya está en modo compacto heredado, ocupa ancho de uno */
+    if(compactSet.has(id) && c.length) return memo[id]=NW+GX;
     if(isCompact(id)) return memo[id]=NW+GX;
     return memo[id]=c.length ? Math.max(NW+GX, c.reduce((s,x)=>s+sw(x),0)) : NW+GX;
   };
@@ -75,18 +89,36 @@ function buildLayout(nodes, compactSet){
     const kids=ch[id]||[];
     if(!kids.length) return;
     if(compactSet.has(id)){
-      /* apilar hijos verticalmente, centrados horizontalmente */
       let cy=y+h+GY;
-      kids.forEach(c=>{
-        place(c, lx+(s-NW)/2, cy);
-        cy+=NHC+GYC;
-      });
+      kids.forEach(c=>{ place(c, lx+(s-NW)/2, cy); cy+=NHC+GYC; });
     } else {
       let cx=lx;
       kids.forEach(c=>{place(c,cx,y+h+GY);cx+=sw(c);});
     }
   };
   let rx=GX; roots.forEach(r=>{place(r,rx,GY);rx+=sw(r)+GX;});
+
+  /* v8: para nodos con MÚLTIPLES jefes, reubicar X al centroide de las posiciones X de los padres.
+     Lo hacemos en orden top-down (por Y) para que los descendientes se reposicionen después. */
+  const multiNodes = nodes
+    .filter(n => parentsOf(n).length>1 && pos[n.id])
+    .sort((a,b)=> (pos[a.id]?.y||0) - (pos[b.id]?.y||0));
+  multiNodes.forEach(n=>{
+    const parents=parentsOf(n).filter(pid=>pos[pid]);
+    if(parents.length<2) return;
+    /* centro X del conjunto de padres (usando centros de cada padre) */
+    const centerXs=parents.map(pid=>pos[pid].x + NW/2);
+    const avg=centerXs.reduce((s,x)=>s+x,0)/centerXs.length;
+    const newX=avg - NW/2;
+    const deltaX=newX - pos[n.id].x;
+    /* mover este nodo Y todos sus descendientes (primarios) la misma cantidad */
+    const mover=(id)=>{
+      pos[id].x += deltaX;
+      (ch[id]||[]).forEach(mover);
+    };
+    mover(n.id);
+  });
+
   const xs=Object.values(pos).map(p=>p.x), ys=Object.values(pos).map(p=>p.y);
   const mnx=Math.min(...xs)-GX, mny=Math.min(...ys)-GY;
   Object.keys(pos).forEach(id=>{pos[id].x-=mnx; pos[id].y-=mny;});
@@ -169,7 +201,7 @@ export default function App(){
 
   /* edit panel */
   const [editId,   setEditId]   = useState(null);
-  const [editPId,  setEditPId]  = useState("");
+  const [editPIds, setEditPIds] = useState([]);
   const [editFoto, setEditFoto] = useState("");
   const [bossQ,    setBossQ]    = useState("");
 
@@ -408,23 +440,46 @@ export default function App(){
     setGrpForm({nombre:"",colorIdx:0,parentId:"",source:"manual",sourceCol:"area",sourceVal:""});
   };
 
-  /* ── Editar (jefe + foto + datos extendidos v5) ── */
+  /* ── v8: Editar (jefes múltiples + foto + datos) ── */
   const openEdit=n=>{
-    setEditId(n.id); setEditPId(n.parentId||""); setEditFoto(n.foto||""); setBossQ("");
+    setEditId(n.id);
+    setEditPIds(parentsOf(n));
+    setEditFoto(n.foto||""); setBossQ("");
     setEditNombre(n.nombre||""); setEditCargo(n.cargo||""); setEditArea(n.area||""); setEditDept(n.dept||""); setEditEmail(n.email||"");
     setPanel("edit");
   };
   const saveEdit=()=>{
     setNodes(p=>p.map(n=>{
       if(n.id!==editId) return n;
-      if(n.tipo==="grupo") return {...n,parentId:editPId};
-      return {...n,parentId:editPId,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail};
+      const base=n.tipo==="grupo"
+        ? {...n}
+        : {...n,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail};
+      /* aplicar parentIds/parentId según cantidad */
+      delete base.parentId;
+      delete base.parentIds;
+      if(editPIds.length===0) base.parentId="";
+      else if(editPIds.length===1) base.parentId=editPIds[0];
+      else base.parentIds=[...editPIds];
+      return base;
     }));
-    /* también sincronizamos en roster si existe para que al agregar otra persona queden datos consistentes */
     setRoster(r=>r.map(x=>x.id===editId?{...x,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,foto:editFoto}:x));
     setPanel(null); setSel(null); setEditId(null);
   };
-  const delNode=id=>{ setNodes(p=>p.filter(n=>n.id!==id).map(n=>n.parentId===id?{...n,parentId:""}:n)); setSel(null); setPanel(null); setEditId(null); };
+  /* v8: delNode debe quitar el nodo de todas las listas de jefes de otros */
+  const delNode=id=>{
+    setNodes(p=>p.filter(n=>n.id!==id).map(n=>{
+      const ps=parentsOf(n);
+      if(!ps.includes(id)) return n;
+      const next=ps.filter(x=>x!==id);
+      const upd={...n};
+      delete upd.parentId; delete upd.parentIds;
+      if(next.length===0) upd.parentId="";
+      else if(next.length===1) upd.parentId=next[0];
+      else upd.parentIds=next;
+      return upd;
+    }));
+    setSel(null); setPanel(null); setEditId(null);
+  };
   const uploadFoto=e=>{ const f=e.target.files?.[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setEditFoto(ev.target.result); r.readAsDataURL(f); };
 
   /* ── Boss search combinado (roster + nodos grupo) ── */
@@ -513,29 +568,64 @@ export default function App(){
     });
   };
 
-  /* ── v7: validar que un candidato a jefe no sea descendiente (evita ciclos) ── */
+  /* ── v8: ¿candidato es descendiente de ancestro? BFS considerando multi-padres ── */
   const esDescendiente=(candidatoId, ancestroId)=>{
-    /* ¿candidato es descendiente de ancestro? */
+    const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
     const visitados=new Set();
-    let cur=nodes.find(n=>n.id===candidatoId);
-    while(cur?.parentId && !visitados.has(cur.id)){
-      visitados.add(cur.id);
-      if(cur.parentId===ancestroId) return true;
-      cur=nodes.find(n=>n.id===cur.parentId);
+    const stack=[candidatoId];
+    while(stack.length){
+      const id=stack.pop();
+      if(visitados.has(id)) continue;
+      visitados.add(id);
+      const n=byId[id];
+      if(!n) continue;
+      const ps=parentsOf(n);
+      for(const pid of ps){
+        if(pid===ancestroId) return true;
+        stack.push(pid);
+      }
     }
     return false;
   };
 
-  /* ── v7: cuando está activo assignBossFor y el usuario clickea un nodo, ese es el nuevo jefe ── */
+  /* ── v8: toggle de jefe: clic en un jefe ya asignado → lo quita; clic en uno nuevo → lo agrega.
+     Si queda sin jefes → pasa a raíz. Permanece en modo asignar hasta Esc / botón Hecho. ── */
   const onAssignBossClick=(targetId)=>{
     if(!assignBossFor) return false;
-    if(targetId===assignBossFor){ setAssignBossFor(null); return true; }
+    if(targetId===assignBossFor){
+      /* clic en uno mismo → salir del modo */
+      setAssignBossFor(null);
+      return true;
+    }
     if(esDescendiente(targetId,assignBossFor)){
       alert("No puedes elegir un subordinado como jefe (crearía un ciclo)");
       return true;
     }
-    setNodes(p=>p.map(n=>n.id===assignBossFor?{...n,parentId:targetId}:n));
-    setAssignBossFor(null);
+    setNodes(p=>p.map(n=>{
+      if(n.id!==assignBossFor) return n;
+      const ps=parentsOf(n);
+      let next;
+      if(ps.includes(targetId)){
+        /* toggle off */
+        next=ps.filter(x=>x!==targetId);
+      } else {
+        /* toggle on */
+        next=[...ps,targetId];
+      }
+      /* actualizar el nodo: usar parentIds cuando hay varios, parentId cuando hay 0 o 1 */
+      const updated={...n};
+      delete updated.parentId;
+      delete updated.parentIds;
+      if(next.length===0){
+        updated.parentId="";
+      } else if(next.length===1){
+        updated.parentId=next[0];
+      } else {
+        updated.parentIds=next;
+      }
+      return updated;
+    }));
+    /* NO salimos del modo automáticamente — el usuario puede seguir agregando/quitando */
     return true;
   };
   /* cancelar con Escape */
@@ -614,13 +704,28 @@ export default function App(){
   const onMU=()=>setDrag(false);
 
   /* ── Aristas ── */
-  const edges=useMemo(()=>nodes.filter(n=>n.parentId&&pos[n.id]&&pos[n.parentId]).map(n=>{
-    const p=pos[n.parentId],c=pos[n.id];
-    const ph=p.h||NH, ch2=c.h||NH;
-    const x1=p.x+NW/2, y1=p.y+ph, x2=c.x+NW/2, y2=c.y, my=(y1+y2)/2;
-    const active=sel===n.id||sel===n.parentId;
-    return{key:n.id,d:`M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`,active};
-  }),[nodes,pos,sel]);
+  /* v8: edges ahora es multi — una arista por cada par (padre, hijo) */
+  const edges=useMemo(()=>{
+    const arr=[];
+    nodes.forEach(n=>{
+      if(!pos[n.id]) return;
+      const parents=parentsOf(n);
+      parents.forEach((pid,idx)=>{
+        if(!pos[pid]) return;
+        const p=pos[pid], c=pos[n.id];
+        const ph=p.h||NH;
+        const x1=p.x+NW/2, y1=p.y+ph, x2=c.x+NW/2, y2=c.y, my=(y1+y2)/2;
+        const active=sel===n.id||sel===pid;
+        arr.push({
+          key:`${pid}->${n.id}`,
+          d:`M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`,
+          active,
+          multi: parents.length>1,
+        });
+      });
+    });
+    return arr;
+  },[nodes,pos,sel]);
 
   const selNode=nodes.find(n=>n.id===sel);
   const editNode=nodes.find(n=>n.id===editId);
@@ -629,16 +734,32 @@ export default function App(){
     <div style={{display:"flex",flexDirection:"column",height:660,fontFamily:"system-ui,-apple-system,sans-serif",background:"#F8FAFC",overflow:"hidden"}}>
       <style>{CSS}</style>
 
-      {/* v7: Banner modo asignar jefe */}
+      {/* v8: Banner modo asignar jefe (con multi-jefe toggle) */}
       {assignBossFor && (()=>{
         const origen=nodes.find(x=>x.id===assignBossFor);
+        const jefesActuales = origen ? parentsOf(origen).map(pid=>nodes.find(x=>x.id===pid)).filter(Boolean) : [];
         return(
-          <div style={{background:"#FEF3C7",borderBottom:"2px solid #F59E0B",padding:"8px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          <div style={{background:"#FEF3C7",borderBottom:"2px solid #F59E0B",padding:"8px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0,flexWrap:"wrap"}}>
             <span style={{fontSize:18}}>🔗</span>
-            <div style={{flex:1,fontSize:13,color:"#78350F"}}>
-              <strong>Asignar jefe a:</strong> {origen?.nombre||"—"} · Haz clic en el nodo que será su nuevo jefe, o presiona <kbd style={{padding:"1px 6px",background:"#fff",border:"1px solid #D97706",borderRadius:4,fontSize:11,fontFamily:"monospace"}}>Esc</kbd> para cancelar
+            <div style={{flex:1,fontSize:13,color:"#78350F",minWidth:0}}>
+              <div><strong>Asignar jefes a:</strong> {origen?.nombre||"—"}</div>
+              <div style={{fontSize:11,marginTop:2}}>
+                Clic en un nodo para <strong>agregar/quitar</strong> como jefe · Puedes asignar varios ·
+                <kbd style={{margin:"0 4px",padding:"1px 6px",background:"#fff",border:"1px solid #D97706",borderRadius:4,fontSize:10,fontFamily:"monospace"}}>Esc</kbd>
+                o <strong>Hecho</strong> para salir
+              </div>
+              {jefesActuales.length>0 && (
+                <div style={{marginTop:4,display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
+                  <span style={{fontSize:11,fontWeight:600}}>Actuales ({jefesActuales.length}):</span>
+                  {jefesActuales.map(j=>(
+                    <span key={j.id} style={{fontSize:10,padding:"2px 7px",background:"#fff",border:"1px solid #D97706",borderRadius:10,color:"#78350F",fontWeight:600}}>
+                      {j.tipo==="grupo"?"🏢 ":""}{j.nombre}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-            <button className="btn" style={{fontSize:12}} onClick={()=>setAssignBossFor(null)}>Cancelar</button>
+            <button className="btn p" style={{fontSize:12}} onClick={()=>setAssignBossFor(null)}>✓ Hecho</button>
           </div>
         );
       })()}
@@ -1003,40 +1124,54 @@ export default function App(){
               );
             })()}
 
-            {/* Asignar jefe */}
+            {/* v8: Asignar jefes (múltiples) */}
             <div style={{marginBottom:16}}>
-              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>¿Quién es su jefe / dónde reporta?</label>
-              <input className="inp" value={bossQ} onChange={e=>setBossQ(e.target.value)} placeholder="Buscar por nombre…" style={{marginBottom:4}}/>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>Jefes / a quién reporta {editPIds.length>1 && <span style={{color:"#7E22CE"}}>({editPIds.length})</span>}</label>
+
+              {/* Lista de jefes actuales como chips */}
+              {editPIds.length>0 && (
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+                  {editPIds.map(pid=>{
+                    const padre=nodes.find(x=>x.id===pid)||(roster.find(x=>x.id===pid));
+                    if(!padre) return null;
+                    return(
+                      <div key={pid} style={{padding:"3px 6px 3px 8px",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:14,display:"flex",alignItems:"center",gap:5,fontSize:11}}>
+                        <span>{padre.tipo==="grupo"?"🏢":"👤"}</span>
+                        <span style={{fontWeight:600,color:"#1E40AF",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{padre.nombre}</span>
+                        <button onClick={()=>setEditPIds(arr=>arr.filter(x=>x!==pid))} style={{background:"none",border:"none",cursor:"pointer",color:"#93C5FD",fontSize:14,padding:"0 2px",lineHeight:1}}>✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Buscador para agregar otro jefe */}
+              <input className="inp" value={bossQ} onChange={e=>setBossQ(e.target.value)} placeholder={editPIds.length?"Agregar otro jefe…":"Buscar jefe por nombre…"} style={{marginBottom:4}}/>
               {bossQ&&bossResults.length>0&&(
                 <div style={{border:"1px solid #E2E8F0",borderRadius:8,maxHeight:160,overflowY:"auto",background:"#fff",marginBottom:6}}>
-                  {bossResults.map(r=>(
-                    <div key={r.id} onClick={()=>{setEditPId(r.id);setBossQ("");}} style={{padding:"7px 10px",cursor:"pointer",borderBottom:"1px solid #F1F5F9",background:r.id===editPId?"#EFF6FF":"#fff",display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontSize:13}}>{r.tipo==="grupo"?"🏢":"👤"}</span>
-                      <div>
-                        <div style={{fontSize:12,fontWeight:600,color:"#0F172A"}}>{r.nombre}</div>
-                        <div style={{fontSize:10,color:"#64748B"}}>{r.cargo||""}{r.enChart?<span style={{color:"#3B82F6"}}> · en chart</span>:""}</div>
+                  {bossResults.map(r=>{
+                    const yaEs=editPIds.includes(r.id);
+                    return(
+                      <div key={r.id} onClick={()=>{
+                        if(yaEs) return; // ya está
+                        setEditPIds(arr=>[...arr, r.id]);
+                        setBossQ("");
+                      }} style={{padding:"7px 10px",cursor:yaEs?"default":"pointer",borderBottom:"1px solid #F1F5F9",background:yaEs?"#F0FDF4":"#fff",display:"flex",alignItems:"center",gap:8,opacity:yaEs?0.7:1}}>
+                        <span style={{fontSize:13}}>{r.tipo==="grupo"?"🏢":"👤"}</span>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12,fontWeight:600,color:"#0F172A"}}>{r.nombre}</div>
+                          <div style={{fontSize:10,color:"#64748B"}}>{r.cargo||""}{r.enChart?<span style={{color:"#3B82F6"}}> · en chart</span>:""}</div>
+                        </div>
+                        {yaEs && <span style={{fontSize:11,color:"#15803D",fontWeight:700}}>✓ ya es jefe</span>}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               {bossQ&&bossResults.length===0&&<div style={{fontSize:12,color:"#94A3B8",padding:"4px 2px"}}>Sin resultados</div>}
 
-              {editPId&&(()=>{
-                const padre=nodes.find(x=>x.id===editPId)||(roster.find(x=>x.id===editPId));
-                if(!padre)return null;
-                return(
-                  <div style={{padding:"8px 10px",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:8,display:"flex",alignItems:"center",gap:8,marginTop:6}}>
-                    <span style={{fontSize:14}}>{padre.tipo==="grupo"?"🏢":"👤"}</span>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,fontWeight:600,color:"#1E40AF"}}>{padre.nombre}</div>
-                      {padre.cargo&&<div style={{fontSize:10,color:"#3B82F6"}}>{padre.cargo}</div>}
-                    </div>
-                    <button onClick={()=>setEditPId("")} style={{background:"none",border:"none",cursor:"pointer",color:"#93C5FD",fontSize:16}}>✕</button>
-                  </div>
-                );
-              })()}
-              {!editPId&&<div style={{fontSize:11,color:"#94A3B8",padding:"6px 0"}}>Sin jefe asignado (nivel raíz)</div>}
+              {editPIds.length===0 && <div style={{fontSize:11,color:"#94A3B8",padding:"6px 0"}}>Sin jefe asignado (nivel raíz)</div>}
+              <div style={{fontSize:10,color:"#94A3B8",marginTop:4}}>💡 Tip: puedes asignar varios jefes. También existe el botón 🔗 en el nodo para hacerlo visualmente.</div>
             </div>
 
             <div style={{display:"flex",gap:8}}>
@@ -1082,8 +1217,9 @@ export default function App(){
                 <g transform={`scale(${vp.s})`}>
                   {edges.map(e=>(
                     <path key={e.key} d={e.d}
-                      stroke={e.active?"#3B82F6":"#94A3B8"}
-                      strokeWidth={e.active?2.5:1.5}
+                      stroke={e.active?"#3B82F6":(e.multi?"#A855F7":"#94A3B8")}
+                      strokeWidth={e.active?2.5:(e.multi?1.5:1.5)}
+                      strokeDasharray={e.multi?"5 4":undefined}
                       fill="none" strokeLinecap="round"/>
                   ))}
                 </g>
@@ -1123,18 +1259,31 @@ export default function App(){
 
                 /* Persona — tarjeta ID vertical (v5/v7) */
                 const c=col(n.area);
-                const parentGrp=n.parentId?nodes.find(x=>x.id===n.parentId&&x.tipo==="grupo"):null;
+                const parentsList=parentsOf(n);
+                const parentGrp=parentsList.find(pid=>{
+                  const pn=nodes.find(x=>x.id===pid);
+                  return pn?.tipo==="grupo";
+                });
+                const parentGrpNode=parentGrp?nodes.find(x=>x.id===parentGrp):null;
                 const badgeVal=n.area||n.dept;
-                const badgeRedundant=parentGrp?.sourceVal&&(
-                  (parentGrp.sourceCol==="area"&&parentGrp.sourceVal===n.area)||
-                  (parentGrp.sourceCol==="dept"&&parentGrp.sourceVal===n.dept)||
-                  (parentGrp.sourceCol==="cargo"&&parentGrp.sourceVal===n.cargo)
+                const badgeRedundant=parentGrpNode?.sourceVal&&(
+                  (parentGrpNode.sourceCol==="area"&&parentGrpNode.sourceVal===n.area)||
+                  (parentGrpNode.sourceCol==="dept"&&parentGrpNode.sourceVal===n.dept)||
+                  (parentGrpNode.sourceCol==="cargo"&&parentGrpNode.sourceVal===n.cargo)
                 );
                 const esCompacto = p.compact === true;
-                const tengoHijos = nodes.some(x=>x.parentId===n.id);
+                /* v8: tengoHijos ahora considera multi-jefe */
+                const tengoHijos = nodes.some(x=>parentsOf(x).includes(n.id));
                 const esAncestroCompacto = compactSet.has(n.id);
                 const modoAsignar = assignBossFor && assignBossFor !== n.id;
                 const esOrigenAsignar = assignBossFor === n.id;
+                /* v8: ¿este nodo es YA uno de los jefes actuales del origen en asignación? */
+                const esJefeActualDelOrigen = modoAsignar && (()=>{
+                  const origen=nodes.find(x=>x.id===assignBossFor);
+                  return origen && parentsOf(origen).includes(n.id);
+                })();
+                /* v8: ¿tiene múltiples jefes? */
+                const tieneMultiplesJefes = parentsList.length > 1;
 
                 /* ── MODO COMPACTO: fila delgada tipo listado ── */
                 if(esCompacto){
@@ -1144,8 +1293,8 @@ export default function App(){
                       onClick={e=>{e.stopPropagation(); if(modoAsignar){ onAssignBossClick(n.id); return; } setSel(isSel?null:n.id);}}>
                       <div style={{
                         width:NW,height:nh,transform:`scale(${vp.s})`,transformOrigin:"top left",
-                        background:modoAsignar?"#FEF3C7":"#ffffff",
-                        border:`1.5px solid ${modoAsignar?"#F59E0B":(isSel?c.border:"#E2E8F0")}`,
+                        background:esJefeActualDelOrigen?"#DCFCE7":(modoAsignar?"#FEF3C7":"#ffffff"),
+                        border:`1.5px solid ${esJefeActualDelOrigen?"#22C55E":(modoAsignar?"#F59E0B":(isSel?c.border:"#E2E8F0"))}`,
                         borderLeft:`4px solid ${c.border}`,
                         borderRadius:6,
                         display:"flex",alignItems:"center",gap:8,padding:"0 10px",
@@ -1157,6 +1306,8 @@ export default function App(){
                           <div style={{fontSize:11,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{trunc(n.nombre,28)}</div>
                           {n.cargo&&<div style={{fontSize:9,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{trunc(n.cargo,32)}</div>}
                         </div>
+                        {esJefeActualDelOrigen && <span style={{fontSize:13,color:"#15803D",fontWeight:700}}>✓</span>}
+                        {tieneMultiplesJefes && !modoAsignar && <span title={`${parentsList.length} jefes`} style={{fontSize:9,background:"#F3E8FF",color:"#7E22CE",padding:"1px 5px",borderRadius:8,fontWeight:700}}>{parentsList.length}⚇</span>}
                         {isSel&&!modoAsignar&&(
                           <div onClick={e=>{e.stopPropagation();openEdit(n);}} style={{width:22,height:22,borderRadius:5,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
                             <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke={c.text} strokeWidth="1.5" strokeLinejoin="round"/></svg>
@@ -1174,8 +1325,8 @@ export default function App(){
                     onClick={e=>{e.stopPropagation(); if(modoAsignar){ onAssignBossClick(n.id); return; } setSel(isSel?null:n.id);}}>
                     <div style={{
                       width:NW,height:nh,transform:`scale(${vp.s})`,transformOrigin:"top left",
-                      background:modoAsignar?"#FEF3C7":(esOrigenAsignar?"#FEE2E2":"#ffffff"),
-                      border:`1.5px solid ${modoAsignar?"#F59E0B":(esOrigenAsignar?"#EF4444":(isSel?c.border:"#E2E8F0"))}`,
+                      background:esJefeActualDelOrigen?"#DCFCE7":(modoAsignar?"#FEF3C7":(esOrigenAsignar?"#FEE2E2":"#ffffff")),
+                      border:`1.5px solid ${esJefeActualDelOrigen?"#22C55E":(modoAsignar?"#F59E0B":(esOrigenAsignar?"#EF4444":(isSel?c.border:"#E2E8F0")))}`,
                       borderRadius:12,
                       boxShadow:isSel?`0 0 0 3px ${c.bg},0 8px 24px rgba(0,0,0,.15)`:"0 2px 8px rgba(15,23,42,.08)",
                       display:"flex",flexDirection:"column",alignItems:"center",
@@ -1184,6 +1335,18 @@ export default function App(){
                     }}>
                       {/* Banda superior de color */}
                       <div style={{position:"absolute",top:0,left:0,right:0,height:6,background:c.border}}/>
+
+                      {/* v8: check verde si es jefe actual del origen en modo asignar */}
+                      {esJefeActualDelOrigen && (
+                        <div style={{position:"absolute",top:12,left:12,width:22,height:22,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,zIndex:5,boxShadow:"0 2px 6px rgba(34,197,94,.4)"}}>✓</div>
+                      )}
+
+                      {/* v8: badge de múltiples jefes */}
+                      {tieneMultiplesJefes && !modoAsignar && !esJefeActualDelOrigen && (
+                        <div title={`${parentsList.length} jefes`} style={{position:"absolute",top:12,left:12,padding:"2px 7px",borderRadius:10,background:"#F3E8FF",color:"#7E22CE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,zIndex:5,border:"1px solid #D8B4FE"}}>
+                          {parentsList.length}⚇
+                        </div>
+                      )}
 
                       {/* Foto grande */}
                       <div style={{marginTop:16,width:FOTO_SZ,height:FOTO_SZ,borderRadius:"50%",background:c.bg,border:`3px solid ${c.border}`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0,boxShadow:"0 4px 12px rgba(0,0,0,.08)"}}>

@@ -11,10 +11,8 @@
       details > summary { list-style: none; }
       details > summary::-webkit-details-marker { display: none; }
     </style>
-    <!-- React 18 UMD -->
     <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
-    <!-- XLSX (SheetJS) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   </head>
   <body>
@@ -45,6 +43,16 @@ const NW = 180, NH = 168, NHG = 52, GX = 22, GY = 40;
 const FOTO_SZ = 84;
 const NHC = 36;
 const GYC = 6;
+function parentsOf(n) {
+  if (!n) return [];
+  if (Array.isArray(n.parentIds) && n.parentIds.length > 0) return n.parentIds.filter(Boolean);
+  if (n.parentId) return [n.parentId];
+  return [];
+}
+function primaryParentOf(n) {
+  const ps = parentsOf(n);
+  return ps[0] || "";
+}
 function buildLayout(nodes, compactSet) {
   compactSet = compactSet || /* @__PURE__ */ new Set();
   if (!nodes.length) return { pos: {}, W: 600, H: 300 };
@@ -52,7 +60,8 @@ function buildLayout(nodes, compactSet) {
   const ch = Object.fromEntries(nodes.map((n) => [n.id, []]));
   const roots = [];
   nodes.forEach((n) => {
-    if (n.parentId && byId[n.parentId]) ch[n.parentId].push(n.id);
+    const pp = primaryParentOf(n);
+    if (pp && byId[pp]) ch[pp].push(n.id);
     else roots.push(n.id);
   });
   const compactAncestor = {};
@@ -60,9 +69,10 @@ function buildLayout(nodes, compactSet) {
     if (compactAncestor[id] !== void 0) return compactAncestor[id];
     const n = byId[id];
     if (!n) return compactAncestor[id] = null;
-    if (!n.parentId) return compactAncestor[id] = null;
-    if (compactSet.has(n.parentId)) return compactAncestor[id] = n.parentId;
-    return compactAncestor[id] = findCompactAnc(n.parentId);
+    const pp = primaryParentOf(n);
+    if (!pp) return compactAncestor[id] = null;
+    if (compactSet.has(pp)) return compactAncestor[id] = pp;
+    return compactAncestor[id] = findCompactAnc(pp);
   };
   nodes.forEach((n) => findCompactAnc(n.id));
   const isCompact = (id) => compactAncestor[id] !== null;
@@ -74,9 +84,7 @@ function buildLayout(nodes, compactSet) {
   const sw = (id) => {
     if (memo[id] !== void 0) return memo[id];
     const c = ch[id] || [];
-    if (compactSet.has(id) && c.length) {
-      return memo[id] = NW + GX;
-    }
+    if (compactSet.has(id) && c.length) return memo[id] = NW + GX;
     if (isCompact(id)) return memo[id] = NW + GX;
     return memo[id] = c.length ? Math.max(NW + GX, c.reduce((s, x) => s + sw(x), 0)) : NW + GX;
   };
@@ -105,6 +113,20 @@ function buildLayout(nodes, compactSet) {
   roots.forEach((r) => {
     place(r, rx, GY);
     rx += sw(r) + GX;
+  });
+  const multiNodes = nodes.filter((n) => parentsOf(n).length > 1 && pos[n.id]).sort((a, b) => (pos[a.id]?.y || 0) - (pos[b.id]?.y || 0));
+  multiNodes.forEach((n) => {
+    const parents = parentsOf(n).filter((pid) => pos[pid]);
+    if (parents.length < 2) return;
+    const centerXs = parents.map((pid) => pos[pid].x + NW / 2);
+    const avg = centerXs.reduce((s, x) => s + x, 0) / centerXs.length;
+    const newX = avg - NW / 2;
+    const deltaX = newX - pos[n.id].x;
+    const mover = (id) => {
+      pos[id].x += deltaX;
+      (ch[id] || []).forEach(mover);
+    };
+    mover(n.id);
   });
   const xs = Object.values(pos).map((p) => p.x), ys = Object.values(pos).map((p) => p.y);
   const mnx = Math.min(...xs) - GX, mny = Math.min(...ys) - GY;
@@ -185,7 +207,7 @@ function App() {
   const [rosterFilters, setRosterFilters] = useState({ sede: [], cargo: [], dept: [] });
   const [grpForm, setGrpForm] = useState({ nombre: "", colorIdx: 0, parentId: "", source: "manual", sourceCol: "area", sourceVal: "" });
   const [editId, setEditId] = useState(null);
-  const [editPId, setEditPId] = useState("");
+  const [editPIds, setEditPIds] = useState([]);
   const [editFoto, setEditFoto] = useState("");
   const [bossQ, setBossQ] = useState("");
   const [quickAdd, setQuickAdd] = useState(null);
@@ -424,7 +446,7 @@ function App() {
   };
   const openEdit = (n) => {
     setEditId(n.id);
-    setEditPId(n.parentId || "");
+    setEditPIds(parentsOf(n));
     setEditFoto(n.foto || "");
     setBossQ("");
     setEditNombre(n.nombre || "");
@@ -437,8 +459,13 @@ function App() {
   const saveEdit = () => {
     setNodes((p) => p.map((n) => {
       if (n.id !== editId) return n;
-      if (n.tipo === "grupo") return { ...n, parentId: editPId };
-      return { ...n, parentId: editPId, foto: editFoto, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail };
+      const base = n.tipo === "grupo" ? { ...n } : { ...n, foto: editFoto, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail };
+      delete base.parentId;
+      delete base.parentIds;
+      if (editPIds.length === 0) base.parentId = "";
+      else if (editPIds.length === 1) base.parentId = editPIds[0];
+      else base.parentIds = [...editPIds];
+      return base;
     }));
     setRoster((r) => r.map((x) => x.id === editId ? { ...x, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail, foto: editFoto } : x));
     setPanel(null);
@@ -446,7 +473,18 @@ function App() {
     setEditId(null);
   };
   const delNode = (id) => {
-    setNodes((p) => p.filter((n) => n.id !== id).map((n) => n.parentId === id ? { ...n, parentId: "" } : n));
+    setNodes((p) => p.filter((n) => n.id !== id).map((n) => {
+      const ps = parentsOf(n);
+      if (!ps.includes(id)) return n;
+      const next = ps.filter((x) => x !== id);
+      const upd = { ...n };
+      delete upd.parentId;
+      delete upd.parentIds;
+      if (next.length === 0) upd.parentId = "";
+      else if (next.length === 1) upd.parentId = next[0];
+      else upd.parentIds = next;
+      return upd;
+    }));
     setSel(null);
     setPanel(null);
     setEditId(null);
@@ -555,12 +593,20 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
     });
   };
   const esDescendiente = (candidatoId, ancestroId) => {
+    const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
     const visitados = /* @__PURE__ */ new Set();
-    let cur = nodes.find((n) => n.id === candidatoId);
-    while (cur?.parentId && !visitados.has(cur.id)) {
-      visitados.add(cur.id);
-      if (cur.parentId === ancestroId) return true;
-      cur = nodes.find((n) => n.id === cur.parentId);
+    const stack = [candidatoId];
+    while (stack.length) {
+      const id = stack.pop();
+      if (visitados.has(id)) continue;
+      visitados.add(id);
+      const n = byId[id];
+      if (!n) continue;
+      const ps = parentsOf(n);
+      for (const pid of ps) {
+        if (pid === ancestroId) return true;
+        stack.push(pid);
+      }
     }
     return false;
   };
@@ -574,8 +620,27 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
       alert("No puedes elegir un subordinado como jefe (crear\xEDa un ciclo)");
       return true;
     }
-    setNodes((p) => p.map((n) => n.id === assignBossFor ? { ...n, parentId: targetId } : n));
-    setAssignBossFor(null);
+    setNodes((p) => p.map((n) => {
+      if (n.id !== assignBossFor) return n;
+      const ps = parentsOf(n);
+      let next;
+      if (ps.includes(targetId)) {
+        next = ps.filter((x) => x !== targetId);
+      } else {
+        next = [...ps, targetId];
+      }
+      const updated = { ...n };
+      delete updated.parentId;
+      delete updated.parentIds;
+      if (next.length === 0) {
+        updated.parentId = "";
+      } else if (next.length === 1) {
+        updated.parentId = next[0];
+      } else {
+        updated.parentIds = next;
+      }
+      return updated;
+    }));
     return true;
   };
   useEffect(() => {
@@ -666,18 +731,33 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
     if (drag) setVp((v) => ({ ...v, x: e.clientX - ds.x, y: e.clientY - ds.y }));
   };
   const onMU = () => setDrag(false);
-  const edges = useMemo(() => nodes.filter((n) => n.parentId && pos[n.id] && pos[n.parentId]).map((n) => {
-    const p = pos[n.parentId], c = pos[n.id];
-    const ph = p.h || NH, ch2 = c.h || NH;
-    const x1 = p.x + NW / 2, y1 = p.y + ph, x2 = c.x + NW / 2, y2 = c.y, my = (y1 + y2) / 2;
-    const active = sel === n.id || sel === n.parentId;
-    return { key: n.id, d: `M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`, active };
-  }), [nodes, pos, sel]);
+  const edges = useMemo(() => {
+    const arr = [];
+    nodes.forEach((n) => {
+      if (!pos[n.id]) return;
+      const parents = parentsOf(n);
+      parents.forEach((pid, idx) => {
+        if (!pos[pid]) return;
+        const p = pos[pid], c = pos[n.id];
+        const ph = p.h || NH;
+        const x1 = p.x + NW / 2, y1 = p.y + ph, x2 = c.x + NW / 2, y2 = c.y, my = (y1 + y2) / 2;
+        const active = sel === n.id || sel === pid;
+        arr.push({
+          key: `${pid}->${n.id}`,
+          d: `M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`,
+          active,
+          multi: parents.length > 1
+        });
+      });
+    });
+    return arr;
+  }, [nodes, pos, sel]);
   const selNode = nodes.find((n) => n.id === sel);
   const editNode = nodes.find((n) => n.id === editId);
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", height: 660, fontFamily: "system-ui,-apple-system,sans-serif", background: "#F8FAFC", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("style", null, CSS), assignBossFor && (() => {
     const origen = nodes.find((x) => x.id === assignBossFor);
-    return /* @__PURE__ */ React.createElement("div", { style: { background: "#FEF3C7", borderBottom: "2px solid #F59E0B", padding: "8px 14px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 18 } }, "\u{1F517}"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, fontSize: 13, color: "#78350F" } }, /* @__PURE__ */ React.createElement("strong", null, "Asignar jefe a:"), " ", origen?.nombre || "\u2014", " \xB7 Haz clic en el nodo que ser\xE1 su nuevo jefe, o presiona ", /* @__PURE__ */ React.createElement("kbd", { style: { padding: "1px 6px", background: "#fff", border: "1px solid #D97706", borderRadius: 4, fontSize: 11, fontFamily: "monospace" } }, "Esc"), " para cancelar"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { fontSize: 12 }, onClick: () => setAssignBossFor(null) }, "Cancelar"));
+    const jefesActuales = origen ? parentsOf(origen).map((pid) => nodes.find((x) => x.id === pid)).filter(Boolean) : [];
+    return /* @__PURE__ */ React.createElement("div", { style: { background: "#FEF3C7", borderBottom: "2px solid #F59E0B", padding: "8px 14px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 18 } }, "\u{1F517}"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, fontSize: 13, color: "#78350F", minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("strong", null, "Asignar jefes a:"), " ", origen?.nombre || "\u2014"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, marginTop: 2 } }, "Clic en un nodo para ", /* @__PURE__ */ React.createElement("strong", null, "agregar/quitar"), " como jefe \xB7 Puedes asignar varios \xB7", /* @__PURE__ */ React.createElement("kbd", { style: { margin: "0 4px", padding: "1px 6px", background: "#fff", border: "1px solid #D97706", borderRadius: 4, fontSize: 10, fontFamily: "monospace" } }, "Esc"), "o ", /* @__PURE__ */ React.createElement("strong", null, "Hecho"), " para salir"), jefesActuales.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 600 } }, "Actuales (", jefesActuales.length, "):"), jefesActuales.map((j) => /* @__PURE__ */ React.createElement("span", { key: j.id, style: { fontSize: 10, padding: "2px 7px", background: "#fff", border: "1px solid #D97706", borderRadius: 10, color: "#78350F", fontWeight: 600 } }, j.tipo === "grupo" ? "\u{1F3E2} " : "", j.nombre)))), /* @__PURE__ */ React.createElement("button", { className: "btn p", style: { fontSize: 12 }, onClick: () => setAssignBossFor(null) }, "\u2713 Hecho"));
   })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
     setRosterQ("");
     setAddTab("persona");
@@ -780,14 +860,18 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
   })(), editNode.tipo === "persona" && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14, paddingBottom: 14, borderBottom: "1px dashed #E2E8F0" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 } }, "Datos"), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Nombre *"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editNombre, onChange: (e) => setEditNombre(e.target.value) })), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Cargo"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-cargo", value: editCargo, onChange: (e) => setEditCargo(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-cargo" }, uniqueCargos.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Sede / \xC1rea"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-area", value: editArea, onChange: (e) => setEditArea(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-area" }, uniqueSedes.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Departamento"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-dept", value: editDept, onChange: (e) => setEditDept(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-dept" }, uniqueDepts.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Email"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editEmail, onChange: (e) => setEditEmail(e.target.value) }))), editNode.tipo === "grupo" && (() => {
     const g = gcol(editNode.colorIdx ?? 0);
     return /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 54, height: 54, borderRadius: 12, margin: "0 auto 6px", background: g.bg, display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 22 } }, "\u{1F3E2}")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#0F172A" } }, editNode.nombre));
-  })(), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 } }, "\xBFQui\xE9n es su jefe / d\xF3nde reporta?"), /* @__PURE__ */ React.createElement("input", { className: "inp", value: bossQ, onChange: (e) => setBossQ(e.target.value), placeholder: "Buscar por nombre\u2026", style: { marginBottom: 4 } }), bossQ && bossResults.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { border: "1px solid #E2E8F0", borderRadius: 8, maxHeight: 160, overflowY: "auto", background: "#fff", marginBottom: 6 } }, bossResults.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, onClick: () => {
-    setEditPId(r.id);
-    setBossQ("");
-  }, style: { padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #F1F5F9", background: r.id === editPId ? "#EFF6FF" : "#fff", display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13 } }, r.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0F172A" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#64748B" } }, r.cargo || "", r.enChart ? /* @__PURE__ */ React.createElement("span", { style: { color: "#3B82F6" } }, " \xB7 en chart") : ""))))), bossQ && bossResults.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#94A3B8", padding: "4px 2px" } }, "Sin resultados"), editPId && (() => {
-    const padre = nodes.find((x) => x.id === editPId) || roster.find((x) => x.id === editPId);
+  })(), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 } }, "Jefes / a qui\xE9n reporta ", editPIds.length > 1 && /* @__PURE__ */ React.createElement("span", { style: { color: "#7E22CE" } }, "(", editPIds.length, ")")), editPIds.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 } }, editPIds.map((pid) => {
+    const padre = nodes.find((x) => x.id === pid) || roster.find((x) => x.id === pid);
     if (!padre) return null;
-    return /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 10px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, display: "flex", alignItems: "center", gap: 8, marginTop: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14 } }, padre.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#1E40AF" } }, padre.nombre), padre.cargo && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#3B82F6" } }, padre.cargo)), /* @__PURE__ */ React.createElement("button", { onClick: () => setEditPId(""), style: { background: "none", border: "none", cursor: "pointer", color: "#93C5FD", fontSize: 16 } }, "\u2715"));
-  })(), !editPId && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8", padding: "6px 0" } }, "Sin jefe asignado (nivel ra\xEDz)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: saveEdit, style: { flex: 1 } }, "Guardar"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
+    return /* @__PURE__ */ React.createElement("div", { key: pid, style: { padding: "3px 6px 3px 8px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 14, display: "flex", alignItems: "center", gap: 5, fontSize: 11 } }, /* @__PURE__ */ React.createElement("span", null, padre.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, color: "#1E40AF", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, padre.nombre), /* @__PURE__ */ React.createElement("button", { onClick: () => setEditPIds((arr) => arr.filter((x) => x !== pid)), style: { background: "none", border: "none", cursor: "pointer", color: "#93C5FD", fontSize: 14, padding: "0 2px", lineHeight: 1 } }, "\u2715"));
+  })), /* @__PURE__ */ React.createElement("input", { className: "inp", value: bossQ, onChange: (e) => setBossQ(e.target.value), placeholder: editPIds.length ? "Agregar otro jefe\u2026" : "Buscar jefe por nombre\u2026", style: { marginBottom: 4 } }), bossQ && bossResults.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { border: "1px solid #E2E8F0", borderRadius: 8, maxHeight: 160, overflowY: "auto", background: "#fff", marginBottom: 6 } }, bossResults.map((r) => {
+    const yaEs = editPIds.includes(r.id);
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, onClick: () => {
+      if (yaEs) return;
+      setEditPIds((arr) => [...arr, r.id]);
+      setBossQ("");
+    }, style: { padding: "7px 10px", cursor: yaEs ? "default" : "pointer", borderBottom: "1px solid #F1F5F9", background: yaEs ? "#F0FDF4" : "#fff", display: "flex", alignItems: "center", gap: 8, opacity: yaEs ? 0.7 : 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13 } }, r.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0F172A" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#64748B" } }, r.cargo || "", r.enChart ? /* @__PURE__ */ React.createElement("span", { style: { color: "#3B82F6" } }, " \xB7 en chart") : "")), yaEs && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 700 } }, "\u2713 ya es jefe"));
+  })), bossQ && bossResults.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#94A3B8", padding: "4px 2px" } }, "Sin resultados"), editPIds.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8", padding: "6px 0" } }, "Sin jefe asignado (nivel ra\xEDz)"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#94A3B8", marginTop: 4 } }, "\u{1F4A1} Tip: puedes asignar varios jefes. Tambi\xE9n existe el bot\xF3n \u{1F517} en el nodo para hacerlo visualmente.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: saveEdit, style: { flex: 1 } }, "Guardar"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
     setPanel(null);
     setSel(null);
     setEditId(null);
@@ -816,8 +900,9 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
         {
           key: e.key,
           d: e.d,
-          stroke: e.active ? "#3B82F6" : "#94A3B8",
-          strokeWidth: e.active ? 2.5 : 1.5,
+          stroke: e.active ? "#3B82F6" : e.multi ? "#A855F7" : "#94A3B8",
+          strokeWidth: e.active ? 2.5 : e.multi ? 1.5 : 1.5,
+          strokeDasharray: e.multi ? "5 4" : void 0,
           fill: "none",
           strokeLinecap: "round"
         }
@@ -867,14 +952,24 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
           );
         }
         const c = col(n.area);
-        const parentGrp = n.parentId ? nodes.find((x) => x.id === n.parentId && x.tipo === "grupo") : null;
+        const parentsList = parentsOf(n);
+        const parentGrp = parentsList.find((pid) => {
+          const pn = nodes.find((x) => x.id === pid);
+          return pn?.tipo === "grupo";
+        });
+        const parentGrpNode = parentGrp ? nodes.find((x) => x.id === parentGrp) : null;
         const badgeVal = n.area || n.dept;
-        const badgeRedundant = parentGrp?.sourceVal && (parentGrp.sourceCol === "area" && parentGrp.sourceVal === n.area || parentGrp.sourceCol === "dept" && parentGrp.sourceVal === n.dept || parentGrp.sourceCol === "cargo" && parentGrp.sourceVal === n.cargo);
+        const badgeRedundant = parentGrpNode?.sourceVal && (parentGrpNode.sourceCol === "area" && parentGrpNode.sourceVal === n.area || parentGrpNode.sourceCol === "dept" && parentGrpNode.sourceVal === n.dept || parentGrpNode.sourceCol === "cargo" && parentGrpNode.sourceVal === n.cargo);
         const esCompacto = p.compact === true;
-        const tengoHijos = nodes.some((x) => x.parentId === n.id);
+        const tengoHijos = nodes.some((x) => parentsOf(x).includes(n.id));
         const esAncestroCompacto = compactSet.has(n.id);
         const modoAsignar = assignBossFor && assignBossFor !== n.id;
         const esOrigenAsignar = assignBossFor === n.id;
+        const esJefeActualDelOrigen = modoAsignar && (() => {
+          const origen = nodes.find((x) => x.id === assignBossFor);
+          return origen && parentsOf(origen).includes(n.id);
+        })();
+        const tieneMultiplesJefes = parentsList.length > 1;
         if (esCompacto) {
           return /* @__PURE__ */ React.createElement(
             "div",
@@ -896,8 +991,8 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
               height: nh,
               transform: `scale(${vp.s})`,
               transformOrigin: "top left",
-              background: modoAsignar ? "#FEF3C7" : "#ffffff",
-              border: `1.5px solid ${modoAsignar ? "#F59E0B" : isSel ? c.border : "#E2E8F0"}`,
+              background: esJefeActualDelOrigen ? "#DCFCE7" : modoAsignar ? "#FEF3C7" : "#ffffff",
+              border: `1.5px solid ${esJefeActualDelOrigen ? "#22C55E" : modoAsignar ? "#F59E0B" : isSel ? c.border : "#E2E8F0"}`,
               borderLeft: `4px solid ${c.border}`,
               borderRadius: 6,
               display: "flex",
@@ -906,7 +1001,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
               padding: "0 10px",
               cursor: modoAsignar ? "crosshair" : "pointer",
               boxShadow: isSel ? `0 0 0 2px ${c.bg}` : "0 1px 2px rgba(15,23,42,.05)"
-            } }, /* @__PURE__ */ React.createElement("div", { style: { width: 10, height: 10, borderRadius: "50%", background: c.dot, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, trunc(n.nombre, 28)), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, trunc(n.cargo, 32))), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { onClick: (e) => {
+            } }, /* @__PURE__ */ React.createElement("div", { style: { width: 10, height: 10, borderRadius: "50%", background: c.dot, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, trunc(n.nombre, 28)), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, trunc(n.cargo, 32))), esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: "#15803D", fontWeight: 700 } }, "\u2713"), tieneMultiplesJefes && !modoAsignar && /* @__PURE__ */ React.createElement("span", { title: `${parentsList.length} jefes`, style: { fontSize: 9, background: "#F3E8FF", color: "#7E22CE", padding: "1px 5px", borderRadius: 8, fontWeight: 700 } }, parentsList.length, "\u2687"), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { onClick: (e) => {
               e.stopPropagation();
               openEdit(n);
             }, style: { width: 22, height: 22, borderRadius: 5, background: c.bg, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 16 16", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M11 2l3 3-9 9H2v-3L11 2z", stroke: c.text, strokeWidth: "1.5", strokeLinejoin: "round" }))))
@@ -932,8 +1027,8 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
             height: nh,
             transform: `scale(${vp.s})`,
             transformOrigin: "top left",
-            background: modoAsignar ? "#FEF3C7" : esOrigenAsignar ? "#FEE2E2" : "#ffffff",
-            border: `1.5px solid ${modoAsignar ? "#F59E0B" : esOrigenAsignar ? "#EF4444" : isSel ? c.border : "#E2E8F0"}`,
+            background: esJefeActualDelOrigen ? "#DCFCE7" : modoAsignar ? "#FEF3C7" : esOrigenAsignar ? "#FEE2E2" : "#ffffff",
+            border: `1.5px solid ${esJefeActualDelOrigen ? "#22C55E" : modoAsignar ? "#F59E0B" : esOrigenAsignar ? "#EF4444" : isSel ? c.border : "#E2E8F0"}`,
             borderRadius: 12,
             boxShadow: isSel ? `0 0 0 3px ${c.bg},0 8px 24px rgba(0,0,0,.15)` : "0 2px 8px rgba(15,23,42,.08)",
             display: "flex",
@@ -942,7 +1037,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
             overflow: "hidden",
             position: "relative",
             cursor: modoAsignar ? "crosshair" : "pointer"
-          } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: c.border } }), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16, width: FOTO_SZ, height: FOTO_SZ, borderRadius: "50%", background: c.bg, border: `3px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.08)" } }, n.foto ? /* @__PURE__ */ React.createElement("img", { src: n.foto, style: { width: "100%", height: "100%", objectFit: "cover" }, alt: n.nombre }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 26, fontWeight: 700, color: c.text, letterSpacing: "-0.02em" } }, ini(n.nombre))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.nombre, 22)), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 3, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 10, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.cargo, 26)), badgeVal && !badgeRedundant && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 5, background: c.bg, borderRadius: 4, padding: "2px 8px", maxWidth: "calc(100% - 16px)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: c.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "100%" } }, trunc(n.area || n.dept, 22))), esAncestroCompacto && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 8, left: 8, fontSize: 8, fontWeight: 700, color: "#0F766E", background: "#CCFBF1", padding: "1px 6px", borderRadius: 8, letterSpacing: "0.03em" } }, "HIJOS EN LISTA"), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { title: "Editar", onClick: (e) => {
+          } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: c.border } }), esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 12, left: 12, width: 22, height: 22, borderRadius: "50%", background: "#22C55E", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, zIndex: 5, boxShadow: "0 2px 6px rgba(34,197,94,.4)" } }, "\u2713"), tieneMultiplesJefes && !modoAsignar && !esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { title: `${parentsList.length} jefes`, style: { position: "absolute", top: 12, left: 12, padding: "2px 7px", borderRadius: 10, background: "#F3E8FF", color: "#7E22CE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, zIndex: 5, border: "1px solid #D8B4FE" } }, parentsList.length, "\u2687"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16, width: FOTO_SZ, height: FOTO_SZ, borderRadius: "50%", background: c.bg, border: `3px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.08)" } }, n.foto ? /* @__PURE__ */ React.createElement("img", { src: n.foto, style: { width: "100%", height: "100%", objectFit: "cover" }, alt: n.nombre }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 26, fontWeight: 700, color: c.text, letterSpacing: "-0.02em" } }, ini(n.nombre))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.nombre, 22)), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 3, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 10, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.cargo, 26)), badgeVal && !badgeRedundant && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 5, background: c.bg, borderRadius: 4, padding: "2px 8px", maxWidth: "calc(100% - 16px)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: c.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "100%" } }, trunc(n.area || n.dept, 22))), esAncestroCompacto && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 8, left: 8, fontSize: 8, fontWeight: 700, color: "#0F766E", background: "#CCFBF1", padding: "1px 6px", borderRadius: 8, letterSpacing: "0.03em" } }, "HIJOS EN LISTA"), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { title: "Editar", onClick: (e) => {
             e.stopPropagation();
             openEdit(n);
           }, style: { width: 26, height: 26, borderRadius: 7, background: c.bg, border: `1px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" } }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 16 16", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M11 2l3 3-9 9H2v-3L11 2z", stroke: c.text, strokeWidth: "1.5", strokeLinejoin: "round" }))), /* @__PURE__ */ React.createElement("div", { title: "Asignar jefe (clic en otro nodo)", onClick: (e) => {
@@ -995,7 +1090,6 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
 }
 
       
-// Montar la app
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(App));
 
