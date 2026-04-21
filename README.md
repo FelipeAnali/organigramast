@@ -1,37 +1,41 @@
 # Organigramast – Supertiendas Cañaveral
 
-App interna de organigrama con gestión de personal y soporte multi-jefe.
+App interna de organigrama con gestión de personal.
 
-## Novedades v8
+## Novedades v9
 
-### 🔗 Multi-jefe (varios reportes directos)
-Una persona puede reportar a **varios jefes** al mismo tiempo. Caso típico: un líder de Palmitex reporta a los 3 admins de la sede.
+### 🔧 Bugs arreglados
+- **Multi-jefe ahora funciona con sedes (🏢)**: antes al clickear una sede en modo asignar, solo la seleccionaba sin agregarla como jefe. Ahora las sedes también son asignables.
+- **Tarjetas uniformes y compactas**: todas las personas se ven con el mismo diseño simple (avatar pequeño + nombre + cargo + sede), no hay dos tamaños distintos.
 
-- **Visualmente**: el nodo aparece una sola vez, centrado bajo sus jefes, con una línea a cada uno. Las líneas de jefes adicionales se ven punteadas en morado para distinguir del principal.
-- **Cómo asignar**: selecciona una persona → clic en 🔗 → clic en cualquier otro nodo del canvas para agregarlo como jefe. Sigue clickeando para agregar más. Presiona `Esc` o clic en "✓ Hecho" para salir.
-- **Toggle**: clic en un nodo que ya es jefe → se quita. Clic en uno nuevo → se agrega.
-- **Indicador visual**: los nodos que ya son jefes del origen aparecen con fondo verde y ✓. Nodos con múltiples jefes muestran un badge morado con el contador (ej: "3⚇").
-- **Panel editor**: también permite gestionar múltiples jefes con chips removibles.
-- **Protección de ciclos**: no puedes asignar un subordinado como jefe (la app lo valida).
+### 🔗 Multi-jefe
+Una persona puede reportar a varios jefes:
+- Selecciona una persona → clic en 🔗
+- Banner amarillo arriba te guía: "Asignar jefes a: [nombre]"
+- Clic en cada jefe deseado (persona o sede 🏢) → se van agregando uno a uno
+- Los jefes asignados se pintan verde con ✓
+- Clic nuevamente en un jefe verde → lo quita (toggle)
+- `Esc` o botón "✓ Hecho" para salir
+- Personas con varios jefes muestran badge "N⚇"
+- Líneas moradas punteadas para jefes adicionales (el principal queda sólido gris)
 
-### Otras mejoras que ya estaban
-1. **Modo compacto por nodo** — botón ≡ para mostrar hijos como lista delgada sin foto.
-2. **Filtros multi-selección** — chips para combinar varias sedes/cargos/departamentos.
-3. **Asignar jefe visual** — base del punto anterior.
+### Otras funcionalidades
+- **Modo compacto por nodo** (≡): los subordinados de ese nodo pasan a lista delgada
+- **Filtros multi-selección**: chips combinables por sedes/cargos/departamentos
+- **Memoria portable**: 💾 Guardar / 📂 Cargar archivo `.orgmem`
+- **Sin datos en el navegador**: al cerrar se pierde todo si no descargaste memoria
 
 ## Archivos
 
-- **`index.html`** — aplicación autónoma compilada. Es lo que GitHub Pages sirve.
-- **`App.jsx`** — código fuente en React/JSX (referencia editable).
+- **`index.html`** — aplicación compilada (es lo que GitHub Pages sirve)
+- **`App.jsx`** — código fuente editable
 
 ## Deploy
 
-GitHub Pages sirve `index.html` desde la raíz del repo (rama `main`, Settings → Pages → "Deploy from a branch").
+Sube ambos archivos a la raíz del repo `organigramast`, rama `main`. Settings → Pages → "Deploy from a branch".
 
 Sitio: https://felipeanali.github.io/organigramast/
 
-## Privacidad
+## Compatibilidad
 
-La app **NO guarda nada en el navegador**. Usa **💾 Guardar memoria** para descargar un archivo `.orgmem` con tu trabajo, y **📂 Cargar memoria** para recuperarlo.
-
-Los archivos `.orgmem` generados en v7 o anteriores siguen funcionando — la app lee ambos formatos (`parentId` legacy y `parentIds[]` nuevo).
+Los archivos `.orgmem` generados en v6/v7/v8 siguen funcionando — la app lee ambos formatos (`parentId` legacy y `parentIds[]` nuevo).
