@@ -1,41 +1,32 @@
 # Organigramast – Supertiendas Cañaveral
 
-App interna de organigrama con gestión de personal.
+## v10 — Vuelta al diseño con fotos grandes
 
-## Novedades v9
+Las tarjetas de persona son GRANDES con foto de protagonismo (como en v8).
+El modo "simple/básico" sigue disponible, pero **solo cuando tú lo decidas** con el botón ≡.
 
-### 🔧 Bugs arreglados
-- **Multi-jefe ahora funciona con sedes (🏢)**: antes al clickear una sede en modo asignar, solo la seleccionaba sin agregarla como jefe. Ahora las sedes también son asignables.
-- **Tarjetas uniformes y compactas**: todas las personas se ven con el mismo diseño simple (avatar pequeño + nombre + cargo + sede), no hay dos tamaños distintos.
+### Único cambio vs v8
+Se arregló el bug real del multi-jefe: los grupos (🏢 sedes) ahora responden al modo
+asignar jefe. Antes al clickear una sede durante el modo, solo se seleccionaba sin
+agregarla. Ahora se pinta amarilla como candidata y verde con ✓ cuando es jefe actual.
 
-### 🔗 Multi-jefe
-Una persona puede reportar a varios jefes:
-- Selecciona una persona → clic en 🔗
-- Banner amarillo arriba te guía: "Asignar jefes a: [nombre]"
-- Clic en cada jefe deseado (persona o sede 🏢) → se van agregando uno a uno
-- Los jefes asignados se pintan verde con ✓
-- Clic nuevamente en un jefe verde → lo quita (toggle)
-- `Esc` o botón "✓ Hecho" para salir
-- Personas con varios jefes muestran badge "N⚇"
-- Líneas moradas punteadas para jefes adicionales (el principal queda sólido gris)
+## Flujo multi-jefe
 
-### Otras funcionalidades
-- **Modo compacto por nodo** (≡): los subordinados de ese nodo pasan a lista delgada
-- **Filtros multi-selección**: chips combinables por sedes/cargos/departamentos
-- **Memoria portable**: 💾 Guardar / 📂 Cargar archivo `.orgmem`
-- **Sin datos en el navegador**: al cerrar se pierde todo si no descargaste memoria
+1. Selecciona una persona → clic en 🔗
+2. Banner amarillo arriba te guía
+3. Clic en cada jefe (persona o sede 🏢) → se van agregando
+4. Los asignados se pintan verde con ✓
+5. Clic de nuevo en un verde → lo quita
+6. `Esc` o "✓ Hecho" para salir
+
+## Cómo usar el modo simple
+
+Selecciona cualquier jefe → clic en ≡ → sus subordinados aparecen en lista
+compacta sin fotos. Clic en ▤ para volver al diseño con fotos.
 
 ## Archivos
 
-- **`index.html`** — aplicación compilada (es lo que GitHub Pages sirve)
-- **`App.jsx`** — código fuente editable
-
-## Deploy
-
-Sube ambos archivos a la raíz del repo `organigramast`, rama `main`. Settings → Pages → "Deploy from a branch".
+- `index.html` — app compilada (servida por GitHub Pages)
+- `App.jsx` — código fuente editable
 
 Sitio: https://felipeanali.github.io/organigramast/
-
-## Compatibilidad
-
-Los archivos `.orgmem` generados en v6/v7/v8 siguen funcionando — la app lee ambos formatos (`parentId` legacy y `parentIds[]` nuevo).

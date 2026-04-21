@@ -24,10 +24,10 @@ const GPAL = [
   { bg:"#334155", border:"#1E293B", text:"#ffffff" },
 ];
 
-const NW=150, NH=78, NHG=44, GX=20, GY=44;
-const AVATAR_SZ=44; // avatar pequeño circular
-const NHC=36; // altura nodo en modo lista (hijos de ancestros compactos)
-const GYC=6;
+const NW=180, NH=168, NHG=52, GX=22, GY=40;
+const FOTO_SZ=84;
+const NHC=36; // altura nodo compacto (modo lista)
+const GYC=6;  // gap vertical entre nodos compactos apilados
 
 /* v8: helper para obtener todos los padres de un nodo (soporta parentIds[] y parentId legacy) */
 function parentsOf(n){
@@ -1229,34 +1229,33 @@ export default function App(){
                 const p=pos[n.id]; if(!p)return null;
                 const isSel=sel===n.id;
                 const nh=n.tipo==="grupo"?NHG:NH;
-                /* v9: vars comunes a grupo y persona */
-                const modoAsignar = assignBossFor && assignBossFor !== n.id;
-                const esOrigenAsignar = assignBossFor === n.id;
+                /* v10: vars comunes a grupo y persona */
+                const modoAsignar_g = assignBossFor && assignBossFor !== n.id;
 
                 if(n.tipo==="grupo"){
                   const g=gcol(n.colorIdx??0);
-                  const esJefeActDelOrigen_g = modoAsignar && (()=>{
+                  const esJefeActDelOrigen_g = modoAsignar_g && (()=>{
                     const origen=nodes.find(x=>x.id===assignBossFor);
                     return origen && parentsOf(origen).includes(n.id);
                   })();
                   return(
                     <div key={n.id} className="on"
                       style={{left:vp.x+p.x*vp.s,top:vp.y+p.y*vp.s,width:NW*vp.s,height:nh*vp.s}}
-                      onClick={e=>{e.stopPropagation(); if(modoAsignar){ onAssignBossClick(n.id); return; } setSel(isSel?null:n.id);}}>
+                      onClick={e=>{e.stopPropagation(); if(modoAsignar_g){ onAssignBossClick(n.id); return; } setSel(isSel?null:n.id);}}>
                       <div style={{
                         width:NW,height:nh,transform:`scale(${vp.s})`,transformOrigin:"top left",
-                        background:esJefeActDelOrigen_g?"#15803D":(modoAsignar?"#F59E0B":g.bg),
-                        border:`2px solid ${esJefeActDelOrigen_g?"#14532D":(modoAsignar?"#D97706":g.border)}`,
+                        background:esJefeActDelOrigen_g?"#15803D":(modoAsignar_g?"#FBBF24":g.bg),
+                        border:`2px solid ${esJefeActDelOrigen_g?"#14532D":(modoAsignar_g?"#D97706":g.border)}`,
                         borderRadius:10,
                         boxShadow:isSel?"0 0 0 3px rgba(255,255,255,.5),0 4px 20px rgba(0,0,0,.2)":"0 2px 8px rgba(0,0,0,.15)",
                         display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"0 14px",
-                        cursor:modoAsignar?"crosshair":"pointer",
+                        cursor:modoAsignar_g?"crosshair":"pointer",
                         position:"relative",
                       }}>
                         <span style={{fontSize:16}}>🏢</span>
-                        <span style={{fontSize:13,fontWeight:700,color:esJefeActDelOrigen_g?"#fff":(modoAsignar?"#78350F":g.text),whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{trunc(n.nombre,20)}</span>
-                        {esJefeActDelOrigen_g && <span style={{position:"absolute",top:-6,right:-6,width:20,height:20,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,boxShadow:"0 2px 6px rgba(0,0,0,.3)"}}>✓</span>}
-                        {isSel&&!modoAsignar&&(
+                        <span style={{fontSize:13,fontWeight:700,color:esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text),whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{trunc(n.nombre,20)}</span>
+                        {esJefeActDelOrigen_g && <span style={{position:"absolute",top:-8,right:-8,width:22,height:22,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,boxShadow:"0 2px 6px rgba(0,0,0,.3)",border:"2px solid #fff"}}>✓</span>}
+                        {isSel&&!modoAsignar_g&&(
                           <div onClick={e=>{e.stopPropagation();openEdit(n);}}
                             style={{width:24,height:24,borderRadius:6,background:"rgba(255,255,255,.25)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/></svg>
@@ -1285,6 +1284,8 @@ export default function App(){
                 /* v8: tengoHijos ahora considera multi-jefe */
                 const tengoHijos = nodes.some(x=>parentsOf(x).includes(n.id));
                 const esAncestroCompacto = compactSet.has(n.id);
+                const modoAsignar = assignBossFor && assignBossFor !== n.id;
+                const esOrigenAsignar = assignBossFor === n.id;
                 /* v8: ¿este nodo es YA uno de los jefes actuales del origen en asignación? */
                 const esJefeActualDelOrigen = modoAsignar && (()=>{
                   const origen=nodes.find(x=>x.id===assignBossFor);
@@ -1326,7 +1327,7 @@ export default function App(){
                   );
                 }
 
-                /* ── MODO NORMAL: tarjeta compacta uniforme (v9) ── */
+                /* ── MODO NORMAL: tarjeta grande ── */
                 return(
                   <div key={n.id} className="on"
                     style={{left:vp.x+p.x*vp.s,top:vp.y+p.y*vp.s,width:NW*vp.s,height:nh*vp.s}}
@@ -1335,69 +1336,72 @@ export default function App(){
                       width:NW,height:nh,transform:`scale(${vp.s})`,transformOrigin:"top left",
                       background:esJefeActualDelOrigen?"#DCFCE7":(modoAsignar?"#FEF3C7":(esOrigenAsignar?"#FEE2E2":"#ffffff")),
                       border:`1.5px solid ${esJefeActualDelOrigen?"#22C55E":(modoAsignar?"#F59E0B":(esOrigenAsignar?"#EF4444":(isSel?c.border:"#E2E8F0")))}`,
-                      borderTop:`4px solid ${c.border}`,
-                      borderRadius:10,
-                      boxShadow:isSel?`0 0 0 3px ${c.bg},0 4px 14px rgba(0,0,0,.1)`:"0 1px 4px rgba(15,23,42,.06)",
-                      display:"flex",alignItems:"center",gap:8,
-                      padding:"6px 10px",
+                      borderRadius:12,
+                      boxShadow:isSel?`0 0 0 3px ${c.bg},0 8px 24px rgba(0,0,0,.15)`:"0 2px 8px rgba(15,23,42,.08)",
+                      display:"flex",flexDirection:"column",alignItems:"center",
                       overflow:"hidden",position:"relative",
                       cursor:modoAsignar?"crosshair":"pointer",
                     }}>
-                      {/* Avatar pequeño (foto o iniciales) */}
-                      <div style={{width:AVATAR_SZ,height:AVATAR_SZ,borderRadius:"50%",background:c.bg,border:`2px solid ${c.border}`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0}}>
-                        {n.foto
-                          ? <img src={n.foto} style={{width:"100%",height:"100%",objectFit:"cover"}} alt={n.nombre}/>
-                          : <span style={{fontSize:14,fontWeight:700,color:c.text,letterSpacing:"-0.02em"}}>{ini(n.nombre)}</span>
-                        }
-                      </div>
+                      {/* Banda superior de color */}
+                      <div style={{position:"absolute",top:0,left:0,right:0,height:6,background:c.border}}/>
 
-                      {/* Texto: nombre + cargo */}
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:11,fontWeight:700,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>
-                          {trunc(n.nombre,20)}
-                        </div>
-                        {n.cargo && (
-                          <div style={{fontSize:9,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:1,lineHeight:1.2}}>
-                            {trunc(n.cargo,22)}
-                          </div>
-                        )}
-                        {badgeVal && !badgeRedundant && (
-                          <div style={{fontSize:8,color:c.text,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2,lineHeight:1.2}}>
-                            {trunc(n.area||n.dept,24)}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Indicador ✓ (jefe actual del origen en modo asignar) */}
+                      {/* v8: check verde si es jefe actual del origen en modo asignar */}
                       {esJefeActualDelOrigen && (
-                        <div style={{position:"absolute",top:4,right:4,width:18,height:18,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,zIndex:5}}>✓</div>
+                        <div style={{position:"absolute",top:12,left:12,width:22,height:22,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,zIndex:5,boxShadow:"0 2px 6px rgba(34,197,94,.4)"}}>✓</div>
                       )}
 
-                      {/* Badge múltiples jefes */}
+                      {/* v8: badge de múltiples jefes */}
                       {tieneMultiplesJefes && !modoAsignar && !esJefeActualDelOrigen && (
-                        <div title={`${parentsList.length} jefes`} style={{position:"absolute",top:4,right:4,padding:"1px 5px",borderRadius:8,background:"#F3E8FF",color:"#7E22CE",fontSize:9,fontWeight:700,zIndex:5,border:"1px solid #D8B4FE"}}>
+                        <div title={`${parentsList.length} jefes`} style={{position:"absolute",top:12,left:12,padding:"2px 7px",borderRadius:10,background:"#F3E8FF",color:"#7E22CE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,zIndex:5,border:"1px solid #D8B4FE"}}>
                           {parentsList.length}⚇
                         </div>
                       )}
 
-                      {/* Indicador ancestro compactado */}
-                      {esAncestroCompacto && !isSel && (
-                        <div style={{position:"absolute",bottom:2,right:4,fontSize:7,fontWeight:700,color:"#0F766E",background:"#CCFBF1",padding:"1px 4px",borderRadius:6,letterSpacing:"0.03em"}}>
-                          LISTA
+                      {/* Foto grande */}
+                      <div style={{marginTop:16,width:FOTO_SZ,height:FOTO_SZ,borderRadius:"50%",background:c.bg,border:`3px solid ${c.border}`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0,boxShadow:"0 4px 12px rgba(0,0,0,.08)"}}>
+                        {n.foto
+                          ? <img src={n.foto} style={{width:"100%",height:"100%",objectFit:"cover"}} alt={n.nombre}/>
+                          : <span style={{fontSize:26,fontWeight:700,color:c.text,letterSpacing:"-0.02em"}}>{ini(n.nombre)}</span>
+                        }
+                      </div>
+
+                      {/* Nombre */}
+                      <div style={{marginTop:10,padding:"0 10px",width:"100%",textAlign:"center",fontSize:12,fontWeight:700,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>
+                        {trunc(n.nombre,22)}
+                      </div>
+
+                      {/* Cargo */}
+                      {n.cargo && (
+                        <div style={{marginTop:3,padding:"0 10px",width:"100%",textAlign:"center",fontSize:10,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>
+                          {trunc(n.cargo,26)}
                         </div>
                       )}
 
-                      {/* Botones cuando seleccionado */}
+                      {/* Badge sede */}
+                      {badgeVal && !badgeRedundant && (
+                        <div style={{marginTop:5,background:c.bg,borderRadius:4,padding:"2px 8px",maxWidth:"calc(100% - 16px)"}}>
+                          <span style={{fontSize:9,color:c.text,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",display:"inline-block",maxWidth:"100%"}}>{trunc(n.area||n.dept,22)}</span>
+                        </div>
+                      )}
+
+                      {/* v7: indicador de ancestro compactado */}
+                      {esAncestroCompacto && (
+                        <div style={{position:"absolute",bottom:8,left:8,fontSize:8,fontWeight:700,color:"#0F766E",background:"#CCFBF1",padding:"1px 6px",borderRadius:8,letterSpacing:"0.03em"}}>
+                          HIJOS EN LISTA
+                        </div>
+                      )}
+
+                      {/* Botones (edit + v7: compactar + asignar jefe) */}
                       {isSel && !modoAsignar && (
-                        <div style={{position:"absolute",top:2,right:2,display:"flex",gap:2,background:"rgba(255,255,255,.95)",padding:2,borderRadius:6,boxShadow:"0 1px 3px rgba(0,0,0,.1)"}}>
-                          <div title="Editar" onClick={e=>{e.stopPropagation();openEdit(n);}} style={{width:20,height:20,borderRadius:4,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
-                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke={c.text} strokeWidth="1.5" strokeLinejoin="round"/></svg>
+                        <div style={{position:"absolute",top:10,right:10,display:"flex",flexDirection:"column",gap:4}}>
+                          <div title="Editar" onClick={e=>{e.stopPropagation();openEdit(n);}} style={{width:26,height:26,borderRadius:7,background:c.bg,border:`1px solid ${c.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke={c.text} strokeWidth="1.5" strokeLinejoin="round"/></svg>
                           </div>
-                          <div title="Asignar jefe(s)" onClick={e=>{e.stopPropagation();setAssignBossFor(n.id);setSel(null);}} style={{width:20,height:20,borderRadius:4,background:"#FEF3C7",border:"1px solid #F59E0B",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:10}}>
+                          <div title="Asignar jefe (clic en otro nodo)" onClick={e=>{e.stopPropagation();setAssignBossFor(n.id);setSel(null);}} style={{width:26,height:26,borderRadius:7,background:"#FEF3C7",border:"1px solid #F59E0B",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:13}}>
                             🔗
                           </div>
                           {tengoHijos && (
-                            <div title={esAncestroCompacto?"Desplegar hijos":"Compactar hijos"} onClick={e=>{e.stopPropagation();toggleCompact(n.id);}} style={{width:20,height:20,borderRadius:4,background:esAncestroCompacto?"#CCFBF1":"#F1F5F9",border:`1px solid ${esAncestroCompacto?"#14B8A6":"#CBD5E1"}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:9,fontWeight:700,color:esAncestroCompacto?"#0F766E":"#64748B"}}>
+                            <div title={esAncestroCompacto?"Mostrar hijos como tarjetas":"Compactar hijos (modo lista)"} onClick={e=>{e.stopPropagation();toggleCompact(n.id);}} style={{width:26,height:26,borderRadius:7,background:esAncestroCompacto?"#CCFBF1":"#F1F5F9",border:`1px solid ${esAncestroCompacto?"#14B8A6":"#CBD5E1"}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:11,fontWeight:700,color:esAncestroCompacto?"#0F766E":"#64748B"}}>
                               {esAncestroCompacto?"▤":"≡"}
                             </div>
                           )}
