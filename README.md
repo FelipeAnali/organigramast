@@ -1,75 +1,47 @@
-# Organigrama
+# Organigrama Cañaveral
 
-Aplicación React para crear y gestionar organigramas interactivos. Importa empleados desde **xlsx / csv**, agrupa por sedes o departamentos, asigna jerarquías y exporta en **PDF** o **JSON**.
+App interna para gestionar organigramas de Supertiendas Cañaveral.
 
-## ✨ Características
-
-- 📥 **Importar** archivo Excel / CSV con detección automática de columnas
-- 🔄 **Reimport** con resolución de conflictos campo a campo
-- 🏢 **Grupos** (sedes, áreas) como nodos intermedios con color personalizable
-- 👤 **Tarjetas de persona** con foto, cargo, área y badge de sede
-- 🔗 **Quick-add**: asigna jefe al instante al agregar una persona
-- 🖱 Canvas **drag & zoom** con rueda del mouse
-- 💾 **Memoria portable** (`.orgmem`) — todo el trabajo se descarga como archivo, sin localStorage
-- 📄 **Exportar PDF** y **JSON**
-- 🔒 **Privacidad**: ningún dato queda en el navegador
-
-## 🚀 Inicio rápido
+## Uso local
 
 ```bash
-# 1. Instalar dependencias
 npm install
-
-# 2. Arrancar el servidor de desarrollo
 npm run dev
-
-# 3. Abrir http://localhost:5173
 ```
 
-## 🏗 Estructura del proyecto
+## Deploy a GitHub Pages
 
+Cada push a la rama `main` despliega automáticamente gracias al workflow en `.github/workflows/deploy.yml`.
+
+### Configuración inicial (solo una vez)
+
+1. En GitHub, ve a **Settings → Pages**.
+2. En **Source**, selecciona **GitHub Actions**.
+3. Haz push a `main` y espera 1-2 minutos.
+
+### Sitio en producción
+
+https://felipeanali.github.io/organigramast/
+
+### Cambiar el nombre del repo
+
+Si algún día renombras el repo, edita la línea `base` en `vite.config.js`:
+
+```js
+export default defineConfig({
+  plugins: [react()],
+  base: "/nuevo-nombre/",
+});
 ```
-organigrama/
-├── index.html          # Punto de entrada HTML (Vite)
-├── package.json
-├── vite.config.js
-└── src/
-    ├── main.jsx        # Monta React en #root
-    ├── App.jsx         # Componente principal (UI + lógica)
-    ├── constants.js    # Paletas de colores, dimensiones y CSS global
-    └── utils.js        # buildLayout, ini, trunc, hasVal, detectCols
-```
 
-## 📦 Dependencias principales
+## Estructura
 
-| Paquete | Uso |
-|---------|-----|
-| `react` + `react-dom` | Framework UI |
-| `xlsx` | Leer archivos Excel y CSV |
-| `html2canvas` + `jspdf` | Exportar PDF (cargadas dinámicamente desde CDN) |
+- `src/App.jsx` — componente principal
+- `src/constants.js` — paletas, dimensiones, CSS
+- `src/utils.js` — layout del árbol y helpers
+- `src/main.jsx` — entry point
 
-## 🗂 Flujo de uso recomendado
+## Formato de archivos
 
-1. **Importar xlsx** → mapear columnas (nombre, cargo, área, departamento, ID)
-2. **Agregar grupos** (sedes / departamentos) como nodos raíz
-3. **Agregar personas** del roster → asignar conexión (jefe o grupo)
-4. **Editar** cualquier nodo: foto, datos, jerarquía
-5. **💾 Guardar memoria** para preservar el trabajo entre sesiones
-6. **Descargar PDF** para compartir el organigrama
-
-## 📝 Formato del archivo maestro
-
-El importador detecta automáticamente columnas con nombres similares a:
-
-| Campo | Nombres reconocidos |
-|-------|---------------------|
-| Nombre | `nombre`, `nombre del empleado`, `name` |
-| Cargo | `cargo`, `descripcion del cargo`, `position` |
-| Área | `area`, `sede`, `descripcion c.o.` |
-| Departamento | `departamento`, `dept`, `descripcion ccosto` |
-| ID | `id`, `codigo unico`, `employee id` |
-| Fecha retiro | `fecha retiro`, `fecha de retiro`, `end date` |
-
-## 📄 Licencia
-
-MIT
+- **Maestro (xlsx/csv)**: el archivo de nómina original. Al importar detecta columnas automáticamente.
+- **Memoria portable (.orgmem)**: archivo con todo el trabajo guardado. Sube y baja desde la app — nada se guarda en el navegador.
