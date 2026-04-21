@@ -3,10 +3,836 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Organigrama</title>
+    <title>Organigrama Cañaveral</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
+      #root { height: 100%; }
+      #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #64748B; font-size: 14px; }
+    </style>
+    <!-- React 18 UMD -->
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <!-- XLSX (SheetJS) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <div id="root"><div id="loading">Cargando organigrama…</div></div>
+    <script>
+      // Hacer XLSX accesible con el nombre "XLSX" (SheetJS ya lo expone como window.XLSX)
+      // Código compilado de la app (JSX -> JS plano por esbuild)
+      const { useState, useMemo, useRef, useCallback, useEffect } = React;
+const PAL = [
+  { bg: "#EFF6FF", border: "#3B82F6", text: "#1E40AF", dot: "#3B82F6" },
+  { bg: "#F0FDF4", border: "#22C55E", text: "#15803D", dot: "#22C55E" },
+  { bg: "#FDF4FF", border: "#A855F7", text: "#7E22CE", dot: "#A855F7" },
+  { bg: "#FFF7ED", border: "#F97316", text: "#C2410C", dot: "#F97316" },
+  { bg: "#FFF1F2", border: "#F43F5E", text: "#BE123C", dot: "#F43F5E" },
+  { bg: "#F0FDFA", border: "#14B8A6", text: "#0F766E", dot: "#14B8A6" },
+  { bg: "#FEFCE8", border: "#EAB308", text: "#854D0E", dot: "#EAB308" },
+  { bg: "#F1F5F9", border: "#64748B", text: "#334155", dot: "#64748B" }
+];
+const GPAL = [
+  { bg: "#1E40AF", border: "#1E3A8A", text: "#ffffff" },
+  { bg: "#15803D", border: "#14532D", text: "#ffffff" },
+  { bg: "#7E22CE", border: "#581C87", text: "#ffffff" },
+  { bg: "#C2410C", border: "#9A3412", text: "#ffffff" },
+  { bg: "#BE123C", border: "#9F1239", text: "#ffffff" },
+  { bg: "#0F766E", border: "#134E4A", text: "#ffffff" },
+  { bg: "#854D0E", border: "#713F12", text: "#ffffff" },
+  { bg: "#334155", border: "#1E293B", text: "#ffffff" }
+];
+const NW = 180, NH = 168, NHG = 52, GX = 22, GY = 40;
+const FOTO_SZ = 84;
+function buildLayout(nodes) {
+  if (!nodes.length) return { pos: {}, W: 600, H: 300 };
+  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const ch = Object.fromEntries(nodes.map((n) => [n.id, []]));
+  const roots = [];
+  nodes.forEach((n) => {
+    if (n.parentId && byId[n.parentId]) ch[n.parentId].push(n.id);
+    else roots.push(n.id);
+  });
+  const memo = {};
+  const sw = (id) => {
+    if (memo[id] !== void 0) return memo[id];
+    const c = ch[id] || [];
+    return memo[id] = c.length ? Math.max(NW + GX, c.reduce((s, x) => s + sw(x), 0)) : NW + GX;
+  };
+  const pos = {};
+  const place = (id, lx, y) => {
+    const h = byId[id]?.tipo === "grupo" ? NHG : NH;
+    const s = sw(id);
+    pos[id] = { x: lx + (s - NW) / 2, y, h };
+    let cx = lx;
+    (ch[id] || []).forEach((c) => {
+      place(c, cx, y + h + GY);
+      cx += sw(c);
+    });
+  };
+  let rx = GX;
+  roots.forEach((r) => {
+    place(r, rx, GY);
+    rx += sw(r) + GX;
+  });
+  const xs = Object.values(pos).map((p) => p.x), ys = Object.values(pos).map((p) => p.y);
+  const mnx = Math.min(...xs) - GX, mny = Math.min(...ys) - GY;
+  Object.keys(pos).forEach((id) => {
+    pos[id].x -= mnx;
+    pos[id].y -= mny;
+  });
+  const W = Math.max(...Object.values(pos).map((p) => p.x)) + NW + GX;
+  const H = Math.max(...Object.values(pos).map((p) => p.y + p.h)) + GY;
+  return { pos, W, H };
+}
+const ini = (n) => (n || "").split(" ").map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
+const trunc = (s = "", mx = 22) => s.length > mx ? s.slice(0, mx - 1) + "\u2026" : s;
+const hasVal = (v) => {
+  if (v === null || v === void 0) return false;
+  const s = String(v).trim();
+  return s !== "" && s.toLowerCase() !== "nat" && s !== "undefined" && s !== "null";
+};
+const VCOLS = {
+  nombre: ["nombre del empleado", "nombre", "name", "employee name"],
+  cargo: ["descripcion del cargo", "cargo", "position", "puesto", "job title"],
+  area: ["descripcion c.o.", "descripcion co", "area", "sede", "location"],
+  dept: ["descripcion ccosto", "departamento", "department", "dept", "ccosto"],
+  id: ["codigo unico", "id", "employee id", "codigo"],
+  fechaRetiro: ["fecha retiro", "fecha de retiro", "fecha_retiro", "end date", "termination date"]
+};
+function detectCols(headers) {
+  const cl = (h) => h.toLowerCase().replace(/[^a-záéíóúñ\s.]/g, "").trim();
+  const res = {};
+  Object.entries(VCOLS).forEach(([key, vs]) => {
+    const f = headers.find((h) => vs.some((v) => cl(h).includes(cl(v))));
+    if (f) res[key] = f;
+  });
+  return res;
+}
+const CSS = `
+  *{box-sizing:border-box}
+  .btn{padding:5px 13px;border-radius:8px;border:1px solid #CBD5E1;background:#fff;cursor:pointer;font-size:13px;color:#334155;transition:background .15s;white-space:nowrap;font-family:inherit}
+  .btn:hover{background:#F1F5F9}
+  .btn.p{background:#3B82F6;color:#fff;border-color:#3B82F6}
+  .btn.p:hover{background:#2563EB}
+  .btn.g{background:#22C55E;color:#fff;border-color:#22C55E}
+  .btn.g:hover{background:#16A34A}
+  .btn.o{background:#F97316;color:#fff;border-color:#F97316}
+  .btn.o:hover{background:#EA580C}
+  .btn.d{color:#DC2626;border-color:#FCA5A5}
+  .btn.d:hover{background:#FEF2F2}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .inp{padding:7px 11px;border:1px solid #CBD5E1;border-radius:8px;font-size:13px;width:100%;background:#fff;color:#0F172A;outline:none;font-family:inherit}
+  .inp:focus{border-color:#3B82F6;box-shadow:0 0 0 2px #DBEAFE}
+  select.inp{background:#fff}
+  .rrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #F1F5F9;cursor:pointer;transition:background .12s}
+  .rrow:hover{background:#F8FAFC}
+  .rrow.added{background:#F0FDF4}
+  .on{position:absolute;cursor:pointer}
+  .zb{width:30px;height:30px;border-radius:8px;border:1px solid #CBD5E1;background:#fff;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:#334155;font-family:inherit}
+  .zb:hover{background:#F1F5F9}
+  .tab{padding:7px 14px;border-radius:8px;border:1px solid #E2E8F0;background:transparent;cursor:pointer;font-size:13px;color:#64748B;font-family:inherit}
+  .tab.active{background:#3B82F6;color:#fff;border-color:#3B82F6}
+  .dot-unsaved{width:8px;height:8px;border-radius:50%;background:#F97316;animation:pulse 1.5s infinite;display:inline-block}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+  .modal{background:#fff;border-radius:14px;max-width:720px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  .diff-field{display:grid;grid-template-columns:80px 1fr 1fr 18px;gap:8px;align-items:center;padding:3px 0;font-size:12px}
+`;
+function App() {
+  const [roster, setRoster] = useState([]);
+  const [nodes, setNodes] = useState([]);
+  const [panel, setPanel] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [addTab, setAddTab] = useState("persona");
+  const [impRows, setImpRows] = useState([]);
+  const [impHdrs, setImpHdrs] = useState([]);
+  const [colMap, setColMap] = useState({});
+  const [impFile, setImpFile] = useState("");
+  const [filterOn, setFilterOn] = useState(true);
+  const [rosterQ, setRosterQ] = useState("");
+  const [rosterFilters, setRosterFilters] = useState({ sede: "", cargo: "", dept: "" });
+  const [grpForm, setGrpForm] = useState({ nombre: "", colorIdx: 0, parentId: "", source: "manual", sourceCol: "area", sourceVal: "" });
+  const [editId, setEditId] = useState(null);
+  const [editPId, setEditPId] = useState("");
+  const [editFoto, setEditFoto] = useState("");
+  const [bossQ, setBossQ] = useState("");
+  const [quickAdd, setQuickAdd] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [memFileName, setMemFileName] = useState("");
+  const memRef = useRef(null);
+  const [editNombre, setEditNombre] = useState("");
+  const [editCargo, setEditCargo] = useState("");
+  const [editArea, setEditArea] = useState("");
+  const [editDept, setEditDept] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [impMode, setImpMode] = useState("initial");
+  const [conflicts, setConflicts] = useState([]);
+  useEffect(() => {
+    const load = (src) => {
+      if (document.querySelector(`script[src="${src}"]`)) return;
+      const s = document.createElement("script");
+      s.src = src;
+      document.head.appendChild(s);
+    };
+    load("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+    load("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+  }, []);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const firstRender = useRef(true);
+  const suppressDirty = useRef(0);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    if (suppressDirty.current > 0) {
+      suppressDirty.current--;
+      return;
+    }
+    if (roster.length > 0 || nodes.length > 0) setDirty(true);
+  }, [roster, nodes]);
+  useEffect(() => {
+    const h = (e) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "Tienes cambios sin guardar. Descarga la memoria portable antes de salir.";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [dirty]);
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+  const fileRef = useRef(null);
+  const fotoRef = useRef(null);
+  const [vp, setVp] = useState({ x: 60, y: 60, s: 1 });
+  const [drag, setDrag] = useState(false);
+  const [ds, setDs] = useState({ x: 0, y: 0 });
+  const areaIdx = useMemo(() => {
+    const areas = [...new Set(nodes.filter((n) => n.tipo === "persona").map((n) => n.area).filter(Boolean))];
+    return Object.fromEntries(areas.map((a, i) => [a, i % PAL.length]));
+  }, [nodes]);
+  const col = (a) => PAL[areaIdx[a] ?? 7];
+  const gcol = (i) => GPAL[i % GPAL.length];
+  const uniqueSedes = useMemo(() => [...new Set(roster.map((r) => r.area).filter(Boolean))].sort(), [roster]);
+  const uniqueCargos = useMemo(() => [...new Set(roster.map((r) => r.cargo).filter(Boolean))].sort(), [roster]);
+  const uniqueDepts = useMemo(() => [...new Set(roster.map((r) => r.dept).filter(Boolean))].sort(), [roster]);
+  const sourceColValues = useMemo(() => {
+    if (grpForm.sourceCol === "area") return uniqueSedes;
+    if (grpForm.sourceCol === "cargo") return uniqueCargos;
+    if (grpForm.sourceCol === "dept") return uniqueDepts;
+    return [];
+  }, [grpForm.sourceCol, uniqueSedes, uniqueCargos, uniqueDepts]);
+  const { pos, W, H } = useMemo(() => buildLayout(nodes), [nodes]);
+  const inChart = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
+  const rosterFiltered = useMemo(() => {
+    let r = roster;
+    if (rosterFilters.sede) r = r.filter((x) => x.area === rosterFilters.sede);
+    if (rosterFilters.cargo) r = r.filter((x) => x.cargo === rosterFilters.cargo);
+    if (rosterFilters.dept) r = r.filter((x) => x.dept === rosterFilters.dept);
+    if (!rosterQ.trim()) return r.slice(0, 80);
+    const q = rosterQ.toLowerCase();
+    return r.filter((r2) => [r2.nombre, r2.cargo, r2.area, r2.dept].some((v) => (v || "").toLowerCase().includes(q))).slice(0, 80);
+  }, [roster, rosterQ, rosterFilters]);
+  const prevCount = useMemo(() => {
+    const total = impRows.length;
+    if (!colMap.fechaRetiro || !filterOn) return { total, activos: total, excl: 0 };
+    const activos = impRows.filter((r) => !hasVal(r[colMap.fechaRetiro])).length;
+    return { total, activos, excl: total - activos };
+  }, [impRows, colMap, filterOn]);
+  const readFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImpFile(f.name);
+    setImpMode(roster.length > 0 ? "reimport" : "initial");
+    const r = new FileReader();
+    r.onload = (ev) => {
+      let rows = [], headers = [];
+      if (f.name.match(/\.(csv|txt)$/i)) {
+        const lines = ev.target.result.split("\n").filter((l) => l.trim());
+        headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+        rows = lines.slice(1).map((l) => {
+          const vs = l.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+          return Object.fromEntries(headers.map((h, i) => [h, vs[i] || ""]));
+        }).filter((r2) => Object.values(r2).some((v) => v));
+      } else {
+        const wb = XLSX.read(ev.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        if (data.length) {
+          headers = Object.keys(data[0]);
+          rows = data;
+        }
+      }
+      setImpHdrs(headers);
+      setImpRows(rows);
+      const det = detectCols(headers);
+      setColMap(det);
+      setFilterOn(!!det.fechaRetiro);
+      setPanel("colmap");
+    };
+    if (f.name.match(/\.(csv|txt)$/i)) r.readAsText(f);
+    else r.readAsArrayBuffer(f);
+    e.target.value = "";
+  };
+  const applyImport = () => {
+    const get = (row, k) => colMap[k] ? (row[colMap[k]] || "").toString().trim() : "";
+    let rows = impRows;
+    if (filterOn && colMap.fechaRetiro) rows = rows.filter((r) => !hasVal(r[colMap.fechaRetiro]));
+    const newRoster = rows.map((row, i) => {
+      const nombre = get(row, "nombre");
+      if (!nombre) return null;
+      const emailRaw = row["Email del contacto"] || row["Email"] || row["email"] || "";
+      return { id: get(row, "id") || `r${i}_${Date.now()}`, nombre, cargo: get(row, "cargo"), area: get(row, "area"), dept: get(row, "dept"), email: String(emailRaw).trim(), foto: "", tipo: "persona" };
+    }).filter(Boolean);
+    if (impMode === "initial") {
+      suppressDirty.current = 1;
+      setRoster(newRoster);
+      setNodes([]);
+      setSel(null);
+      setImpRows([]);
+      setImpHdrs([]);
+      setPanel("add");
+      setAddTab("persona");
+      return;
+    }
+    const newById = Object.fromEntries(newRoster.map((r) => [r.id, r]));
+    const conf = [];
+    const mergedRoster = [];
+    const seenIds = /* @__PURE__ */ new Set();
+    const fields = ["nombre", "cargo", "area", "dept", "email"];
+    roster.forEach((old) => {
+      const nw = newById[old.id];
+      seenIds.add(old.id);
+      if (!nw) {
+        mergedRoster.push(old);
+        return;
+      }
+      const diffs = {};
+      fields.forEach((f) => {
+        const a = (old[f] || "").toString().trim();
+        const b = (nw[f] || "").toString().trim();
+        if (a !== b) diffs[f] = { old: a, nuevo: b };
+      });
+      if (Object.keys(diffs).length === 0) {
+        mergedRoster.push(old);
+        return;
+      }
+      conf.push({ id: old.id, nombre: old.nombre, enChart: inChart.has(old.id), diffs, resolucion: {} });
+      mergedRoster.push(old);
+    });
+    newRoster.forEach((nw) => {
+      if (!seenIds.has(nw.id)) mergedRoster.push(nw);
+    });
+    const nuevos = mergedRoster.length - roster.length;
+    setRoster(mergedRoster);
+    setImpRows([]);
+    setImpHdrs([]);
+    if (conf.length === 0) {
+      setPanel(null);
+      alert(`Maestro actualizado. ${newRoster.length} registros procesados. ${nuevos > 0 ? nuevos + " empleados nuevos agregados al roster. " : ""}Sin conflictos.`);
+    } else {
+      setConflicts(conf);
+      setPanel("diff");
+    }
+  };
+  const resolveConflict = (idx, field, choice) => {
+    setConflicts((c) => c.map((x, i) => i !== idx ? x : { ...x, resolucion: { ...x.resolucion, [field]: choice } }));
+  };
+  const resolveAll = (choice) => {
+    setConflicts((c) => c.map((x) => {
+      const res = {};
+      Object.keys(x.diffs).forEach((f) => res[f] = choice);
+      return { ...x, resolucion: res };
+    }));
+  };
+  const applyResolutions = () => {
+    const ajustes = {};
+    conflicts.forEach((c) => {
+      const cambios = {};
+      Object.entries(c.diffs).forEach(([f, { old, nuevo }]) => {
+        const choice = c.resolucion[f] || "old";
+        cambios[f] = choice === "nuevo" ? nuevo : old;
+      });
+      ajustes[c.id] = cambios;
+    });
+    setRoster((r) => r.map((x) => ajustes[x.id] ? { ...x, ...ajustes[x.id] } : x));
+    setNodes((n) => n.map((x) => ajustes[x.id] ? { ...x, ...ajustes[x.id] } : x));
+    setConflicts([]);
+    setPanel(null);
+  };
+  const addPersona = (r) => {
+    if (inChart.has(r.id)) return;
+    if (nodes.length === 0) {
+      setNodes((p) => [...p, { ...r, parentId: "", tipo: "persona" }]);
+      return;
+    }
+    setQuickAdd({ person: r, parentId: "", q: "" });
+  };
+  const confirmQuickAdd = () => {
+    if (!quickAdd) return;
+    setNodes((p) => [...p, { ...quickAdd.person, parentId: quickAdd.parentId, tipo: "persona" }]);
+    setQuickAdd(null);
+  };
+  const addGrupo = () => {
+    const nombre = grpForm.source === "columna" ? grpForm.sourceVal : grpForm.nombre;
+    if (!nombre.trim()) return;
+    setNodes((p) => [...p, { id: `g${Date.now()}`, nombre, colorIdx: grpForm.colorIdx, parentId: grpForm.parentId, tipo: "grupo", ...grpForm.source === "columna" ? { sourceCol: grpForm.sourceCol, sourceVal: nombre } : {} }]);
+    setGrpForm({ nombre: "", colorIdx: 0, parentId: "", source: "manual", sourceCol: "area", sourceVal: "" });
+  };
+  const openEdit = (n) => {
+    setEditId(n.id);
+    setEditPId(n.parentId || "");
+    setEditFoto(n.foto || "");
+    setBossQ("");
+    setEditNombre(n.nombre || "");
+    setEditCargo(n.cargo || "");
+    setEditArea(n.area || "");
+    setEditDept(n.dept || "");
+    setEditEmail(n.email || "");
+    setPanel("edit");
+  };
+  const saveEdit = () => {
+    setNodes((p) => p.map((n) => {
+      if (n.id !== editId) return n;
+      if (n.tipo === "grupo") return { ...n, parentId: editPId };
+      return { ...n, parentId: editPId, foto: editFoto, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail };
+    }));
+    setRoster((r) => r.map((x) => x.id === editId ? { ...x, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail, foto: editFoto } : x));
+    setPanel(null);
+    setSel(null);
+    setEditId(null);
+  };
+  const delNode = (id) => {
+    setNodes((p) => p.filter((n) => n.id !== id).map((n) => n.parentId === id ? { ...n, parentId: "" } : n));
+    setSel(null);
+    setPanel(null);
+    setEditId(null);
+  };
+  const uploadFoto = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = (ev) => setEditFoto(ev.target.result);
+    r.readAsDataURL(f);
+  };
+  const bossResults = useMemo(() => {
+    if (!bossQ.trim()) return [];
+    const q = bossQ.toLowerCase();
+    const fromRoster = roster.filter((r) => r.id !== editId && [r.nombre, r.cargo, r.area].some((v) => (v || "").toLowerCase().includes(q))).slice(0, 20).map((r) => ({ ...r, enChart: inChart.has(r.id) }));
+    const fromGroups = nodes.filter((n) => n.tipo === "grupo" && n.id !== editId && (n.nombre || "").toLowerCase().includes(q)).map((n) => ({ ...n, enChart: true, cargo: "Grupo / Sede" }));
+    return [...fromGroups, ...fromRoster].slice(0, 25);
+  }, [bossQ, roster, nodes, editId, inChart]);
+  const quickBossResults = useMemo(() => {
+    const q = (quickAdd?.q || "").toLowerCase().trim();
+    if (!q) return nodes.slice(0, 20).map((n) => ({ ...n, enChart: true, cargo: n.tipo === "grupo" ? "Grupo / Sede" : n.cargo }));
+    return nodes.filter((n) => (n.nombre || "").toLowerCase().includes(q) || (n.cargo || "").toLowerCase().includes(q)).slice(0, 20).map((n) => ({ ...n, enChart: true, cargo: n.tipo === "grupo" ? "Grupo / Sede" : n.cargo }));
+  }, [quickAdd?.q, nodes]);
+  const exportJSON = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ roster, nodes }, null, 2)], { type: "application/json" }));
+    a.download = `organigrama_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`;
+    a.click();
+  };
+  const importJSON = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = (ev) => {
+      try {
+        const d = JSON.parse(ev.target.result);
+        if (d.nodes) setNodes(d.nodes);
+        if (d.roster) setRoster(d.roster);
+      } catch {
+      }
+    };
+    r.readAsText(f);
+    e.target.value = "";
+  };
+  const MEM_MAGIC = "CANAVERAL_ORGMEM";
+  const saveMem = () => {
+    try {
+      const mem = { _magic: MEM_MAGIC, _version: 1, _savedAt: (/* @__PURE__ */ new Date()).toISOString(), roster, nodes };
+      const json = JSON.stringify(mem);
+      const blob = new Blob([json], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const d = /* @__PURE__ */ new Date(), fecha = d.toISOString().slice(0, 10), hora = d.toTimeString().slice(0, 5).replace(":", "");
+      a.download = `organigrama_canaveral_${fecha}_${hora}.orgmem`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1e3);
+      setDirty(false);
+      setMemFileName(a.download);
+    } catch (err) {
+      console.error(err);
+      alert("Error al guardar memoria: " + err.message);
+    }
+  };
+  const loadMem = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (dirty && !confirm("Tienes cambios sin guardar que se perder\xE1n. \xBFContinuar?")) {
+      e.target.value = "";
+      return;
+    }
+    const r = new FileReader();
+    r.onload = (ev) => {
+      try {
+        const mem = JSON.parse(ev.target.result);
+        if (mem._magic !== MEM_MAGIC && !(mem.roster || mem.nodes)) throw new Error("Archivo no v\xE1lido");
+        suppressDirty.current = 1;
+        if (Array.isArray(mem.roster)) setRoster(mem.roster);
+        else setRoster([]);
+        if (Array.isArray(mem.nodes)) setNodes(mem.nodes);
+        else setNodes([]);
+        setMemFileName(f.name);
+        setDirty(false);
+        setSel(null);
+        setPanel(null);
+        setTimeout(() => {
+          const fecha = mem._savedAt ? new Date(mem._savedAt).toLocaleString("es-CO") : "";
+          alert(`Memoria cargada: ${f.name}${fecha ? "\nGuardada: " + fecha : ""}
+${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
+        }, 100);
+      } catch (err) {
+        alert("No se pudo cargar la memoria: " + err.message);
+      }
+    };
+    r.readAsText(f);
+    e.target.value = "";
+  };
+  const exportPDF = useCallback(async () => {
+    if (!chartRef.current || pdfLoading) return;
+    if (!nodes.length) {
+      alert("No hay nada que exportar");
+      return;
+    }
+    setPdfLoading(true);
+    const prevVp = { ...vp };
+    const el = chartRef.current;
+    const prevStyle = {
+      position: el.style.position,
+      inset: el.style.inset,
+      width: el.style.width,
+      height: el.style.height,
+      overflow: el.style.overflow
+    };
+    try {
+      const h2c = window.html2canvas;
+      const jsPDF = window.jspdf?.jsPDF;
+      if (!h2c || !jsPDF) {
+        setPdfLoading(false);
+        alert("Librer\xEDas PDF cargando, intenta en 2 segundos.");
+        return;
+      }
+      setVp({ x: 0, y: 0, s: 1 });
+      await new Promise((r) => setTimeout(r, 200));
+      el.style.position = "absolute";
+      el.style.inset = "auto";
+      el.style.left = "0";
+      el.style.top = "0";
+      el.style.width = W + "px";
+      el.style.height = H + "px";
+      el.style.overflow = "visible";
+      await new Promise((r) => setTimeout(r, 50));
+      const canvas = await h2c(el, {
+        scale: 2,
+        backgroundColor: "#F8FAFC",
+        useCORS: true,
+        logging: false,
+        width: W,
+        height: H,
+        windowWidth: W,
+        windowHeight: H
+      });
+      const imgData = canvas.toDataURL("image/png");
+      const w2 = canvas.width / 2, h2 = canvas.height / 2;
+      const pdf = new jsPDF({ orientation: w2 > h2 ? "landscape" : "portrait", unit: "px", format: [w2, h2] });
+      pdf.addImage(imgData, "PNG", 0, 0, w2, h2);
+      pdf.save(`organigrama_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert("Error al generar PDF: " + err.message);
+    }
+    Object.entries(prevStyle).forEach(([k, v]) => {
+      el.style[k] = v || "";
+    });
+    el.style.left = "";
+    el.style.top = "";
+    setVp(prevVp);
+    setPdfLoading(false);
+  }, [pdfLoading, nodes.length, W, H, vp]);
+  const onWheel = useCallback((e) => {
+    e.preventDefault();
+    setVp((v) => ({ ...v, s: Math.min(3, Math.max(0.08, v.s * (e.deltaY < 0 ? 1.1 : 0.9))) }));
+  }, []);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [onWheel]);
+  const onMD = (e) => {
+    if (e.target.closest(".on")) return;
+    setDrag(true);
+    setDs({ x: e.clientX - vp.x, y: e.clientY - vp.y });
+  };
+  const onMM = (e) => {
+    if (drag) setVp((v) => ({ ...v, x: e.clientX - ds.x, y: e.clientY - ds.y }));
+  };
+  const onMU = () => setDrag(false);
+  const edges = useMemo(() => nodes.filter((n) => n.parentId && pos[n.id] && pos[n.parentId]).map((n) => {
+    const p = pos[n.parentId], c = pos[n.id];
+    const ph = p.h || NH, ch2 = c.h || NH;
+    const x1 = p.x + NW / 2, y1 = p.y + ph, x2 = c.x + NW / 2, y2 = c.y, my = (y1 + y2) / 2;
+    const active = sel === n.id || sel === n.parentId;
+    return { key: n.id, d: `M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`, active };
+  }), [nodes, pos, sel]);
+  const selNode = nodes.find((n) => n.id === sel);
+  const editNode = nodes.find((n) => n.id === editId);
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", height: 660, fontFamily: "system-ui,-apple-system,sans-serif", background: "#F8FAFC", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("style", null, CSS), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
+    setRosterQ("");
+    setAddTab("persona");
+    setPanel("add");
+  } }, "\uFF0B Agregar"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => fileRef.current?.click() }, roster.length > 0 ? "Actualizar maestro" : "Importar xlsx/csv"), /* @__PURE__ */ React.createElement("input", { ref: fileRef, type: "file", accept: ".xlsx,.xls,.csv,.txt,.json", style: { display: "none" }, onChange: (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.name.endsWith(".json")) importJSON(e);
+    else readFile(e);
+  } }), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => memRef.current?.click(), title: "Cargar memoria portable (.orgmem)" }, "\u{1F4C2} Cargar memoria"), /* @__PURE__ */ React.createElement("input", { ref: memRef, type: "file", accept: ".orgmem,.json", style: { display: "none" }, onChange: loadMem }), /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: saveMem, disabled: roster.length === 0 && nodes.length === 0, title: "Descargar todo el trabajo como archivo portable" }, "\u{1F4BE} Guardar memoria"), nodes.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: exportJSON }, "Exportar JSON"), /* @__PURE__ */ React.createElement("button", { className: "btn o", onClick: exportPDF, disabled: pdfLoading }, pdfLoading ? "Generando\u2026" : "Descargar PDF")), (nodes.length > 0 || roster.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn d", onClick: () => {
+    if (dirty && !confirm("\u26A0 Tienes cambios sin guardar. \xBFLimpiar de todos modos?")) return;
+    setNodes([]);
+    setRoster([]);
+    setSel(null);
+    setDirty(false);
+    setMemFileName("");
+  } }, "Limpiar")), roster.length === 0 && nodes.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 14px", background: "#FFFBEB", borderBottom: "1px solid #FDE68A", fontSize: 12, color: "#854D0E", display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14 } }, "\u{1F512}"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("strong", null, "Privacidad:"), " esta app NO guarda nada en el navegador. Al cerrar la pesta\xF1a se pierde todo. Usa ", /* @__PURE__ */ React.createElement("strong", null, "\u{1F4BE} Guardar memoria"), " para descargar tu trabajo como archivo ", /* @__PURE__ */ React.createElement("code", { style: { background: "#FEF3C7", padding: "1px 5px", borderRadius: 3 } }, ".orgmem"), ", y ", /* @__PURE__ */ React.createElement("strong", null, "\u{1F4C2} Cargar memoria"), " para recuperarlo.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flex: 1, overflow: "hidden" } }, panel === "colmap" && /* @__PURE__ */ React.createElement("div", { style: { width: 300, background: "#fff", borderRight: "1px solid #E2E8F0", padding: 18, overflowY: "auto", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: "#0F172A", marginBottom: 2 } }, impMode === "reimport" ? "Actualizar maestro" : "Mapear columnas"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#64748B", marginBottom: 14 } }, impFile, " \xB7 ", impRows.length, " filas"), impMode === "reimport" && /* @__PURE__ */ React.createElement("div", { style: { padding: 10, background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF", marginBottom: 14, lineHeight: 1.5 } }, /* @__PURE__ */ React.createElement("strong", null, "Modo actualizaci\xF3n:"), " personas se identifican por ID. Si hay diferencias te preguntar\xE9 qu\xE9 conservar."), [{ k: "nombre", l: "Nombre *" }, { k: "cargo", l: "Cargo" }, { k: "area", l: "\xC1rea / Sede" }, { k: "dept", l: "Departamento" }, { k: "id", l: "ID \xFAnico" }].map((f) => /* @__PURE__ */ React.createElement("div", { key: f.k, style: { marginBottom: 10 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#64748B", marginBottom: 3 } }, f.l), /* @__PURE__ */ React.createElement("select", { className: "inp", value: colMap[f.k] || "", onChange: (e) => setColMap((m) => ({ ...m, [f.k]: e.target.value || void 0 })) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 No mapear \u2014"), impHdrs.map((h) => /* @__PURE__ */ React.createElement("option", { key: h, value: h }, h))))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6, marginBottom: 14, padding: 12, background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, fontSize: 13, fontWeight: 600, color: "#15803D" } }, "Solo activos (sin fecha retiro)"), /* @__PURE__ */ React.createElement("div", { onClick: () => setFilterOn((f) => !f), style: { width: 36, height: 20, borderRadius: 10, background: filterOn ? "#22C55E" : "#CBD5E1", cursor: "pointer", position: "relative", transition: "background .2s", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 14, height: 14, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: filterOn ? 19 : 3, transition: "left .2s" } }))), /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#15803D", marginBottom: 3 } }, "Columna fecha retiro"), /* @__PURE__ */ React.createElement("select", { className: "inp", style: { borderColor: "#86EFAC" }, value: colMap.fechaRetiro || "", onChange: (e) => setColMap((m) => ({ ...m, fechaRetiro: e.target.value || void 0 })) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 No mapear \u2014"), impHdrs.map((h) => /* @__PURE__ */ React.createElement("option", { key: h, value: h }, h))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 10 } }, [{ v: prevCount.activos, l: "Activos", bg: "#F0FDF4", bc: "#86EFAC", tc: "#15803D" }, { v: prevCount.excl, l: "Excluidos", bg: "#FFF1F2", bc: "#FCA5A5", tc: "#DC2626" }, { v: prevCount.total, l: "Total", bg: "#F8FAFC", bc: "#E2E8F0", tc: "#475569" }].map((x) => /* @__PURE__ */ React.createElement("div", { key: x.l, style: { flex: 1, textAlign: "center", padding: "6px 0", background: x.bg, border: `1px solid ${x.bc}`, borderRadius: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 16, fontWeight: 700, color: x.tc } }, x.v), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: x.tc, opacity: 0.7 } }, x.l))))), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", style: { flex: 1 }, disabled: !colMap.nombre, onClick: applyImport }, impMode === "reimport" ? "Actualizar" : "Cargar", " ", prevCount.activos, " personas"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setPanel(null) }, "Cancelar"))), panel === "add" && /* @__PURE__ */ React.createElement("div", { style: { width: 300, background: "#fff", borderRight: "1px solid #E2E8F0", display: "flex", flexDirection: "column", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "14px 14px 0", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 14, color: "#0F172A", flex: 1 } }, "Agregar al organigrama"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { padding: "3px 8px", fontSize: 12 }, onClick: () => setPanel(null) }, "\u2715")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("button", { className: `tab${addTab === "persona" ? " active" : ""}`, onClick: () => setAddTab("persona") }, "\u{1F464} Persona"), /* @__PURE__ */ React.createElement("button", { className: `tab${addTab === "grupo" ? " active" : ""}`, onClick: () => setAddTab("grupo") }, "\u{1F3E2} Grupo / Sede"))), addTab === "persona" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { padding: "0 14px 8px", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("input", { className: "inp", value: rosterQ, onChange: (e) => setRosterQ(e.target.value), placeholder: roster.length ? `Buscar en ${roster.length} personas\u2026` : "No hay personas cargadas", autoFocus: true }), roster.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 5 } }, uniqueSedes.length > 0 && /* @__PURE__ */ React.createElement("select", { className: "inp", style: { fontSize: 12, padding: "5px 8px" }, value: rosterFilters.sede, onChange: (e) => setRosterFilters((f) => ({ ...f, sede: e.target.value })) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u{1F3D9} Todas las sedes / \xE1reas"), uniqueSedes.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s))), uniqueCargos.length > 0 && /* @__PURE__ */ React.createElement("select", { className: "inp", style: { fontSize: 12, padding: "5px 8px" }, value: rosterFilters.cargo, onChange: (e) => setRosterFilters((f) => ({ ...f, cargo: e.target.value })) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u{1F4BC} Todos los cargos"), uniqueCargos.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s))), uniqueDepts.length > 0 && /* @__PURE__ */ React.createElement("select", { className: "inp", style: { fontSize: 12, padding: "5px 8px" }, value: rosterFilters.dept, onChange: (e) => setRosterFilters((f) => ({ ...f, dept: e.target.value })) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u{1F5C2} Todos los departamentos"), uniqueDepts.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s))), (rosterFilters.sede || rosterFilters.cargo || rosterFilters.dept) && /* @__PURE__ */ React.createElement("button", { onClick: () => setRosterFilters({ sede: "", cargo: "", dept: "" }), style: { background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 7, color: "#DC2626", fontSize: 11, cursor: "pointer", padding: "4px 10px", alignSelf: "flex-start" } }, "\u2715 Limpiar filtros")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8", marginTop: 5 } }, rosterQ || rosterFilters.sede || rosterFilters.cargo || rosterFilters.dept ? `${rosterFiltered.length} resultado${rosterFiltered.length !== 1 ? "s" : ""}` : roster.length > 80 ? "Primeros 80" : `${rosterFiltered.length} personas`, " \xB7 ", /* @__PURE__ */ React.createElement("span", { style: { color: "#3B82F6" } }, inChart.size, " en chart"))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto" } }, quickAdd && /* @__PURE__ */ React.createElement("div", { style: { margin: "8px 14px", border: "1px solid #BAE6FD", borderRadius: 12, overflow: "hidden", background: "#F0F9FF" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px", background: "#fff", borderBottom: "1px solid #BAE6FD", display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 36, height: 36, borderRadius: "50%", background: "#EFF6FF", border: "1.5px solid #3B82F6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#1E40AF" } }, ini(quickAdd.person.nombre))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, quickAdd.person.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B" } }, quickAdd.person.cargo || "")), /* @__PURE__ */ React.createElement("button", { onClick: () => setQuickAdd(null), style: { background: "none", border: "none", cursor: "pointer", color: "#94A3B8", fontSize: 16, padding: "0 4px" } }, "\u2715")), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0369A1", marginBottom: 6 } }, "\xBFA qui\xE9n reporta?"), /* @__PURE__ */ React.createElement("input", { className: "inp", value: quickAdd.q, onChange: (e) => setQuickAdd((f) => ({ ...f, q: e.target.value })), placeholder: "Buscar en el chart\u2026", style: { marginBottom: 6, borderColor: "#BAE6FD" } }), /* @__PURE__ */ React.createElement("div", { style: { maxHeight: 140, overflowY: "auto", border: "1px solid #E2E8F0", borderRadius: 8, background: "#fff", marginBottom: 8 } }, quickBossResults.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 12px", fontSize: 12, color: "#94A3B8" } }, "Sin nodos en el chart a\xFAn"), quickBossResults.map((n) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      key: n.id,
+      onClick: () => setQuickAdd((f) => ({ ...f, parentId: n.id, q: "" })),
+      style: { padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #F1F5F9", background: n.id === quickAdd.parentId ? "#EFF6FF" : "#fff", display: "flex", alignItems: "center", gap: 8 }
+    },
+    /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13 } }, n.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"),
+    /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, n.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#64748B" } }, n.cargo || "")),
+    n.id === quickAdd.parentId && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, color: "#3B82F6" } }, "\u2713")
+  ))), quickAdd.parentId && (() => {
+    const p = nodes.find((x) => x.id === quickAdd.parentId);
+    return p ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#0369A1", marginBottom: 8, padding: "4px 8px", background: "#E0F2FE", borderRadius: 6 } }, "Reporta a: ", /* @__PURE__ */ React.createElement("strong", null, p.nombre)) : null;
+  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: confirmQuickAdd, style: { flex: 1, fontSize: 12 } }, quickAdd.parentId ? "\u2713 Agregar con conexi\xF3n" : "\u2713 Agregar al chart"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
+    setNodes((p) => [...p, { ...quickAdd.person, parentId: "", tipo: "persona" }]);
+    setQuickAdd(null);
+  }, style: { padding: "5px 10px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#fff", cursor: "pointer", fontSize: 11, color: "#64748B", whiteSpace: "nowrap" } }, "Sin jefe")))), !quickAdd && rosterFiltered.map((r) => {
+    const ya = inChart.has(r.id);
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, className: `rrow${ya ? " added" : ""}`, onClick: () => {
+      if (!ya) addPersona(r);
+    } }, /* @__PURE__ */ React.createElement("div", { style: { width: 32, height: 32, borderRadius: "50%", background: ya ? "#EDE9FE" : "#F1F5F9", border: `1.5px solid ${ya ? "#A855F7" : "#E2E8F0"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: ya ? "#7E22CE" : "#64748B" } }, ini(r.nombre))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, [r.cargo, r.area].filter(Boolean).join(" \xB7 "))), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 7px", borderRadius: 6, background: ya ? "#EDE9FE" : "#EFF6FF", color: ya ? "#7E22CE" : "#3B82F6", fontWeight: 600, flexShrink: 0 } }, ya ? "En chart" : "+ Agregar"));
+  }), !quickAdd && rosterFiltered.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "24px 14px", textAlign: "center", fontSize: 13, color: "#94A3B8" } }, roster.length === 0 ? "Importa un xlsx primero" : "Sin resultados")), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px", borderTop: "1px solid #E2E8F0", fontSize: 11, color: "#64748B", lineHeight: 1.7, flexShrink: 0 } }, quickAdd ? "Selecciona a qui\xE9n reporta o haz clic en \xABSin jefe\xBB para agregarlo como ra\xEDz." : "Clic en una persona \u2192 asigna su conexi\xF3n al instante.")), addTab === "grupo" && /* @__PURE__ */ React.createElement("div", { style: { padding: "0 14px 14px", overflowY: "auto", flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 12px", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 10, marginBottom: 14, fontSize: 12, color: "#C2410C", lineHeight: 1.7 } }, "Los ", /* @__PURE__ */ React.createElement("strong", null, "grupos"), " son nodos intermedios para sedes, \xE1reas o departamentos \u2014 no son personas del roster."), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 12 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#64748B", marginBottom: 4 } }, "Origen del nombre"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, [{ v: "manual", l: "\u270F\uFE0F Manual" }, { v: "columna", l: "\u{1F4CB} Desde maestro" }].map((o) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: o.v,
+      onClick: () => setGrpForm((f) => ({ ...f, source: o.v, nombre: "", sourceVal: "" })),
+      style: { flex: 1, padding: "6px 0", borderRadius: 8, border: `1.5px solid ${grpForm.source === o.v ? "#3B82F6" : "#E2E8F0"}`, background: grpForm.source === o.v ? "#EFF6FF" : "#fff", color: grpForm.source === o.v ? "#1D4ED8" : "#475569", fontSize: 12, fontWeight: 600, cursor: "pointer" }
+    },
+    o.l
+  )))), grpForm.source === "manual" && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 10 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#64748B", marginBottom: 3 } }, "Nombre del grupo *"), /* @__PURE__ */ React.createElement("input", { className: "inp", value: grpForm.nombre, onChange: (e) => setGrpForm((f) => ({ ...f, nombre: e.target.value })), placeholder: "Ej: Punto 14, Sede Norte\u2026" })), grpForm.source === "columna" && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 10, padding: "10px 12px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#0369A1", marginBottom: 4, fontWeight: 600 } }, "Columna del maestro"), /* @__PURE__ */ React.createElement("select", { className: "inp", style: { marginBottom: 8, borderColor: "#BAE6FD" }, value: grpForm.sourceCol, onChange: (e) => setGrpForm((f) => ({ ...f, sourceCol: e.target.value, sourceVal: "" })) }, uniqueSedes.length > 0 && /* @__PURE__ */ React.createElement("option", { value: "area" }, "\u{1F3D9} Sede / \xC1rea (", uniqueSedes.length, " valores)"), uniqueDepts.length > 0 && /* @__PURE__ */ React.createElement("option", { value: "dept" }, "\u{1F5C2} Departamento / C.Costo (", uniqueDepts.length, " valores)"), uniqueCargos.length > 0 && /* @__PURE__ */ React.createElement("option", { value: "cargo" }, "\u{1F4BC} Cargo (", uniqueCargos.length, " valores)")), /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#0369A1", marginBottom: 4, fontWeight: 600 } }, "Valor"), /* @__PURE__ */ React.createElement("select", { className: "inp", style: { borderColor: "#BAE6FD" }, value: grpForm.sourceVal, onChange: (e) => setGrpForm((f) => ({ ...f, sourceVal: e.target.value })) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Seleccionar valor \u2014"), sourceColValues.map((v) => {
+    const yaExiste = nodes.some((n) => n.tipo === "grupo" && n.sourceCol === grpForm.sourceCol && n.sourceVal === v);
+    return /* @__PURE__ */ React.createElement("option", { key: v, value: v, disabled: yaExiste }, v, yaExiste ? " (ya existe)" : "");
+  })), grpForm.sourceVal && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6, fontSize: 11, color: "#0284C7" } }, '\u2713 Se crear\xE1 el grupo "', /* @__PURE__ */ React.createElement("strong", null, grpForm.sourceVal), '" \u2014 la etiqueta en personas conectadas se ocultar\xE1 autom\xE1ticamente')), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 12 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#64748B", marginBottom: 6 } }, "Color"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, GPAL.map((g, i) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      key: i,
+      onClick: () => setGrpForm((f) => ({ ...f, colorIdx: i })),
+      style: { width: 28, height: 28, borderRadius: 7, background: g.bg, cursor: "pointer", border: grpForm.colorIdx === i ? "3px solid #0F172A" : "3px solid transparent", transition: "border .15s" }
+    }
+  )))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#64748B", marginBottom: 3 } }, "Reporta a (opcional)"), /* @__PURE__ */ React.createElement("select", { className: "inp", value: grpForm.parentId, onChange: (e) => setGrpForm((f) => ({ ...f, parentId: e.target.value })) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Nivel ra\xEDz \u2014"), nodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.id, value: n.id }, n.nombre, n.tipo === "grupo" ? " \u{1F3E2}" : "", n.cargo ? ` \xB7 ${n.cargo}` : "")))), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn o",
+      onClick: addGrupo,
+      disabled: grpForm.source === "manual" ? !grpForm.nombre.trim() : !grpForm.sourceVal,
+      style: { width: "100%" }
+    },
+    '\uFF0B Agregar grupo "',
+    grpForm.source === "columna" ? grpForm.sourceVal || "\u2026" : grpForm.nombre || "\u2026",
+    '"'
+  ), nodes.filter((n) => n.tipo === "grupo").length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 } }, "Grupos en el chart"), nodes.filter((n) => n.tipo === "grupo").map((n) => {
+    const g = gcol(n.colorIdx ?? 0);
+    return /* @__PURE__ */ React.createElement("div", { key: n.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid #F1F5F9" } }, /* @__PURE__ */ React.createElement("div", { style: { width: 24, height: 24, borderRadius: 6, background: g.bg, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", flex: 1 } }, n.nombre), /* @__PURE__ */ React.createElement("button", { onClick: () => delNode(n.id), style: { background: "none", border: "none", cursor: "pointer", color: "#F87171", fontSize: 14, padding: "0 4px" } }, "\u2715"));
+  })))), panel === "edit" && editNode && /* @__PURE__ */ React.createElement("div", { style: { width: 280, background: "#fff", borderRight: "1px solid #E2E8F0", padding: 18, overflowY: "auto", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: "#0F172A", marginBottom: 14 } }, editNode.tipo === "grupo" ? "Editar grupo" : "Editar persona"), editNode.tipo === "persona" && (() => {
+    const c = col(editArea);
+    return /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 16 } }, /* @__PURE__ */ React.createElement("div", { onClick: () => fotoRef.current?.click(), style: { width: 84, height: 84, borderRadius: "50%", margin: "0 auto 6px", background: c.bg, border: `3px solid ${c.border}`, overflow: "hidden", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" } }, editFoto ? /* @__PURE__ */ React.createElement("img", { src: editFoto, style: { width: "100%", height: "100%", objectFit: "cover" } }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24, fontWeight: 700, color: c.text } }, ini(editNombre || editNode.nombre))), /* @__PURE__ */ React.createElement("input", { ref: fotoRef, type: "file", accept: "image/*", onChange: uploadFoto, style: { display: "none" } }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { onClick: () => fotoRef.current?.click(), style: { fontSize: 11, color: "#3B82F6", cursor: "pointer" } }, "\u{1F4F7} Cambiar foto")));
+  })(), editNode.tipo === "persona" && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14, paddingBottom: 14, borderBottom: "1px dashed #E2E8F0" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 } }, "Datos"), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Nombre *"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editNombre, onChange: (e) => setEditNombre(e.target.value) })), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Cargo"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-cargo", value: editCargo, onChange: (e) => setEditCargo(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-cargo" }, uniqueCargos.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Sede / \xC1rea"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-area", value: editArea, onChange: (e) => setEditArea(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-area" }, uniqueSedes.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Departamento"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-dept", value: editDept, onChange: (e) => setEditDept(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-dept" }, uniqueDepts.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Email"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editEmail, onChange: (e) => setEditEmail(e.target.value) }))), editNode.tipo === "grupo" && (() => {
+    const g = gcol(editNode.colorIdx ?? 0);
+    return /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 54, height: 54, borderRadius: 12, margin: "0 auto 6px", background: g.bg, display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 22 } }, "\u{1F3E2}")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#0F172A" } }, editNode.nombre));
+  })(), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 } }, "\xBFQui\xE9n es su jefe / d\xF3nde reporta?"), /* @__PURE__ */ React.createElement("input", { className: "inp", value: bossQ, onChange: (e) => setBossQ(e.target.value), placeholder: "Buscar por nombre\u2026", style: { marginBottom: 4 } }), bossQ && bossResults.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { border: "1px solid #E2E8F0", borderRadius: 8, maxHeight: 160, overflowY: "auto", background: "#fff", marginBottom: 6 } }, bossResults.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, onClick: () => {
+    setEditPId(r.id);
+    setBossQ("");
+  }, style: { padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #F1F5F9", background: r.id === editPId ? "#EFF6FF" : "#fff", display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13 } }, r.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0F172A" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#64748B" } }, r.cargo || "", r.enChart ? /* @__PURE__ */ React.createElement("span", { style: { color: "#3B82F6" } }, " \xB7 en chart") : ""))))), bossQ && bossResults.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#94A3B8", padding: "4px 2px" } }, "Sin resultados"), editPId && (() => {
+    const padre = nodes.find((x) => x.id === editPId) || roster.find((x) => x.id === editPId);
+    if (!padre) return null;
+    return /* @__PURE__ */ React.createElement("div", { style: { padding: "8px 10px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, display: "flex", alignItems: "center", gap: 8, marginTop: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14 } }, padre.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#1E40AF" } }, padre.nombre), padre.cargo && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#3B82F6" } }, padre.cargo)), /* @__PURE__ */ React.createElement("button", { onClick: () => setEditPId(""), style: { background: "none", border: "none", cursor: "pointer", color: "#93C5FD", fontSize: 16 } }, "\u2715"));
+  })(), !editPId && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8", padding: "6px 0" } }, "Sin jefe asignado (nivel ra\xEDz)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: saveEdit, style: { flex: 1 } }, "Guardar"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
+    setPanel(null);
+    setSel(null);
+    setEditId(null);
+  } }, "Cancelar")), /* @__PURE__ */ React.createElement("button", { className: "btn d", onClick: () => delNode(editNode.id), style: { width: "100%", marginTop: 8 } }, "Eliminar del chart")), /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      ref: canvasRef,
+      style: { flex: 1, overflow: "hidden", position: "relative", cursor: drag ? "grabbing" : "grab", background: "#F8FAFC" },
+      onMouseDown: onMD,
+      onMouseMove: onMM,
+      onMouseUp: onMU,
+      onMouseLeave: onMU,
+      onClick: (e) => {
+        if (!e.target.closest(".on")) setSel(null);
+      }
+    },
+    /* @__PURE__ */ React.createElement("svg", { style: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("pattern", { id: "dots", width: "24", height: "24", patternUnits: "userSpaceOnUse" }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "1", fill: "#CBD5E1", opacity: ".5" }))), /* @__PURE__ */ React.createElement("rect", { width: "100%", height: "100%", fill: "url(#dots)" })),
+    nodes.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("svg", { width: "52", height: "52", viewBox: "0 0 48 48", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "16", y: "3", width: "16", height: "12", rx: "3", stroke: "#CBD5E1", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "3", y: "33", width: "16", height: "12", rx: "3", stroke: "#CBD5E1", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "29", y: "33", width: "16", height: "12", rx: "3", stroke: "#CBD5E1", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M24 15v8M11 33v-8h26v8", stroke: "#CBD5E1", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, fontSize: 17, color: "#475569" } }, roster.length === 0 ? "Importa tu archivo maestro" : "Agrega personas y grupos"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 4 } }, roster.length === 0 ? /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: () => fileRef.current?.click() }, "Importar xlsx / csv") : null, /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
+      setRosterQ("");
+      setAddTab("persona");
+      setPanel("add");
+    } }, "\uFF0B Agregar")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#94A3B8", maxWidth: 340, textAlign: "center", lineHeight: 1.8, marginTop: 4 } }, /* @__PURE__ */ React.createElement("strong", { style: { color: "#475569" } }, "Flujo sugerido:"), " importa el xlsx \u2192 agrega un grupo (sede) \u2192 agrega personas dentro \u2192 asigna el jefe a cada una.")) : (
+      /* div capturado para PDF */
+      /* @__PURE__ */ React.createElement("div", { ref: chartRef, style: { position: "absolute", inset: 0, overflow: "hidden", background: "#F8FAFC" } }, /* @__PURE__ */ React.createElement("svg", { style: { position: "absolute", left: vp.x, top: vp.y, width: W * vp.s, height: H * vp.s, overflow: "visible", pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("g", { transform: `scale(${vp.s})` }, edges.map((e) => /* @__PURE__ */ React.createElement(
+        "path",
+        {
+          key: e.key,
+          d: e.d,
+          stroke: e.active ? "#3B82F6" : "#94A3B8",
+          strokeWidth: e.active ? 2.5 : 1.5,
+          fill: "none",
+          strokeLinecap: "round"
+        }
+      )))), nodes.map((n) => {
+        const p = pos[n.id];
+        if (!p) return null;
+        const isSel = sel === n.id;
+        const nh = n.tipo === "grupo" ? NHG : NH;
+        if (n.tipo === "grupo") {
+          const g = gcol(n.colorIdx ?? 0);
+          return /* @__PURE__ */ React.createElement(
+            "div",
+            {
+              key: n.id,
+              className: "on",
+              style: { left: vp.x + p.x * vp.s, top: vp.y + p.y * vp.s, width: NW * vp.s, height: nh * vp.s },
+              onClick: (e) => {
+                e.stopPropagation();
+                setSel(isSel ? null : n.id);
+              }
+            },
+            /* @__PURE__ */ React.createElement("div", { style: {
+              width: NW,
+              height: nh,
+              transform: `scale(${vp.s})`,
+              transformOrigin: "top left",
+              background: g.bg,
+              border: `2px solid ${g.border}`,
+              borderRadius: 10,
+              boxShadow: isSel ? "0 0 0 3px rgba(255,255,255,.5),0 4px 20px rgba(0,0,0,.2)" : "0 2px 8px rgba(0,0,0,.15)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              padding: "0 14px"
+            } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16 } }, "\u{1F3E2}"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: g.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, trunc(n.nombre, 20)), isSel && /* @__PURE__ */ React.createElement(
+              "div",
+              {
+                onClick: (e) => {
+                  e.stopPropagation();
+                  openEdit(n);
+                },
+                style: { width: 24, height: 24, borderRadius: 6, background: "rgba(255,255,255,.25)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }
+              },
+              /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 16 16", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M11 2l3 3-9 9H2v-3L11 2z", stroke: "#fff", strokeWidth: "1.5", strokeLinejoin: "round" }))
+            ))
+          );
+        }
+        const c = col(n.area);
+        const parentGrp = n.parentId ? nodes.find((x) => x.id === n.parentId && x.tipo === "grupo") : null;
+        const badgeVal = n.area || n.dept;
+        const badgeRedundant = parentGrp?.sourceVal && (parentGrp.sourceCol === "area" && parentGrp.sourceVal === n.area || parentGrp.sourceCol === "dept" && parentGrp.sourceVal === n.dept || parentGrp.sourceCol === "cargo" && parentGrp.sourceVal === n.cargo);
+        return /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            key: n.id,
+            className: "on",
+            style: { left: vp.x + p.x * vp.s, top: vp.y + p.y * vp.s, width: NW * vp.s, height: nh * vp.s },
+            onClick: (e) => {
+              e.stopPropagation();
+              setSel(isSel ? null : n.id);
+            }
+          },
+          /* @__PURE__ */ React.createElement("div", { style: {
+            width: NW,
+            height: nh,
+            transform: `scale(${vp.s})`,
+            transformOrigin: "top left",
+            background: "#ffffff",
+            border: `1.5px solid ${isSel ? c.border : "#E2E8F0"}`,
+            borderRadius: 12,
+            boxShadow: isSel ? `0 0 0 3px ${c.bg},0 8px 24px rgba(0,0,0,.15)` : "0 2px 8px rgba(15,23,42,.08)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            overflow: "hidden",
+            position: "relative"
+          } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: c.border } }), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16, width: FOTO_SZ, height: FOTO_SZ, borderRadius: "50%", background: c.bg, border: `3px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.08)" } }, n.foto ? /* @__PURE__ */ React.createElement("img", { src: n.foto, style: { width: "100%", height: "100%", objectFit: "cover" }, alt: n.nombre }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 26, fontWeight: 700, color: c.text, letterSpacing: "-0.02em" } }, ini(n.nombre))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.nombre, 22)), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 3, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 10, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.cargo, 26)), badgeVal && !badgeRedundant && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 5, background: c.bg, borderRadius: 4, padding: "2px 8px", maxWidth: "calc(100% - 16px)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: c.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "100%" } }, trunc(n.area || n.dept, 22))), isSel && /* @__PURE__ */ React.createElement("div", { onClick: (e) => {
+            e.stopPropagation();
+            openEdit(n);
+          }, style: { position: "absolute", top: 10, right: 10, width: 26, height: 26, borderRadius: 7, background: c.bg, border: `1px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" } }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 16 16", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M11 2l3 3-9 9H2v-3L11 2z", stroke: c.text, strokeWidth: "1.5", strokeLinejoin: "round" }))))
+        );
+      }))
+    ),
+    nodes.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 16, right: 16, display: "flex", flexDirection: "column", gap: 4 } }, [{ l: "+", fn: () => setVp((v) => ({ ...v, s: Math.min(3, v.s * 1.2) })) }, { l: "\u2212", fn: () => setVp((v) => ({ ...v, s: Math.max(0.08, v.s * 0.8) })) }, { l: "\u2316", fn: () => setVp({ x: 60, y: 60, s: 1 }) }].map((b) => /* @__PURE__ */ React.createElement("button", { key: b.l, className: "zb", onClick: b.fn }, b.l)), /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", fontSize: 10, color: "#94A3B8", marginTop: 2 } }, Math.round(vp.s * 100), "%")),
+    nodes.length > 0 && (() => {
+      const areas = [...new Set(nodes.filter((n) => n.tipo === "persona").map((n) => n.area).filter(Boolean))];
+      if (!areas.length) return null;
+      return /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 16, left: 16, background: "#fff", border: "1px solid #E2E8F0", borderRadius: 10, padding: "10px 14px", maxWidth: 200 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 } }, "\xC1reas"), areas.slice(0, 7).map((a) => {
+        const c = col(a);
+        return /* @__PURE__ */ React.createElement("div", { key: a, style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 8, height: 8, borderRadius: "50%", background: c.dot, flexShrink: 0 } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#475569", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, a));
+      }), areas.length > 7 && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#94A3B8", marginTop: 2 } }, "+", areas.length - 7, " m\xE1s"));
+    })(),
+    selNode && panel !== "edit" && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", background: "#1E293B", color: "#fff", padding: "7px 16px", borderRadius: 20, fontSize: 12, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 10 } }, selNode.nombre, " \u2014 clic en \u270F para editar o asignar jefe")
+  )), panel === "diff" && conflicts.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "modal-bg" }, /* @__PURE__ */ React.createElement("div", { className: "modal" }, /* @__PURE__ */ React.createElement("div", { style: { padding: "16px 20px", borderBottom: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 22 } }, "\u26A0"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Cambios detectados al actualizar el maestro"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#64748B", marginTop: 2 } }, conflicts.length, " persona", conflicts.length !== 1 ? "s" : "", " con diferencias. Elige qu\xE9 conservar."))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 20px", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0", display: "flex", gap: 8, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: "#64748B", marginRight: "auto" } }, "Aplicar a todos:"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { fontSize: 11 }, onClick: () => resolveAll("old") }, "Mantener lo m\xEDo"), /* @__PURE__ */ React.createElement("button", { className: "btn", style: { fontSize: 11 }, onClick: () => resolveAll("nuevo") }, "Usar todo del maestro")), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto" } }, conflicts.map((c, idx) => /* @__PURE__ */ React.createElement("div", { key: c.id, style: { padding: "12px 16px", borderBottom: "1px solid #F1F5F9" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#0F172A" } }, c.nombre), c.enChart && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, padding: "1px 6px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 10, fontWeight: 600 } }, "en chart")), Object.entries(c.diffs).map(([field, { old, nuevo }]) => {
+    const choice = c.resolucion[field];
+    const labels = { nombre: "Nombre", cargo: "Cargo", area: "Sede", dept: "Depto", email: "Email" };
+    return /* @__PURE__ */ React.createElement("div", { key: field, className: "diff-field" }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, color: "#475569" } }, labels[field] || field), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => resolveConflict(idx, field, "old"),
+        style: { padding: "4px 8px", fontSize: 11, border: `1px solid ${choice === "old" ? "#3B82F6" : "#E2E8F0"}`, background: choice === "old" ? "#EFF6FF" : "#fff", borderRadius: 6, cursor: "pointer", textAlign: "left", color: choice === "old" ? "#1E40AF" : "#334155", fontFamily: "inherit", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+        title: `M\xEDo: ${old || "(vac\xEDo)"}`
+      },
+      "M\xEDo: ",
+      /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600 } }, old || "\u2014")
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => resolveConflict(idx, field, "nuevo"),
+        style: { padding: "4px 8px", fontSize: 11, border: `1px solid ${choice === "nuevo" ? "#22C55E" : "#E2E8F0"}`, background: choice === "nuevo" ? "#F0FDF4" : "#fff", borderRadius: 6, cursor: "pointer", textAlign: "left", color: choice === "nuevo" ? "#15803D" : "#334155", fontFamily: "inherit", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+        title: `Maestro: ${nuevo || "(vac\xEDo)"}`
+      },
+      "Maestro: ",
+      /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600 } }, nuevo || "\u2014")
+    ), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: choice ? "#22C55E" : "#CBD5E1", fontWeight: 700, textAlign: "center" } }, choice ? "\u2713" : "\u2022"));
+  })))), /* @__PURE__ */ React.createElement("div", { style: { padding: "14px 20px", borderTop: "1px solid #E2E8F0", display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8" } }, conflicts.reduce((s, c) => s + Object.keys(c.resolucion).length, 0), " de ", conflicts.reduce((s, c) => s + Object.keys(c.diffs).length, 0), " campos resueltos"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
+    setConflicts([]);
+    setPanel(null);
+  } }, "Cancelar"), /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: applyResolutions }, "Aplicar cambios"))))));
+}
+
+      
+// Montar la app
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(App));
+
+    </script>
   </body>
 </html>

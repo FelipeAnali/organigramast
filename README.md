@@ -1,47 +1,24 @@
-# Organigrama Cañaveral
+# Organigramast – Supertiendas Cañaveral
 
-App interna para gestionar organigramas de Supertiendas Cañaveral.
+App interna de organigrama con gestión de personal, importación de maestro y memoria portable.
 
-## Uso local
+## Archivos
 
-```bash
-npm install
-npm run dev
-```
+- **`index.html`** — aplicación autónoma compilada. Es lo que GitHub Pages sirve.
+- **`App.jsx`** — código fuente en React/JSX. No se ejecuta directamente; es la versión legible y editable.
 
-## Deploy a GitHub Pages
+## Cómo hacer cambios
 
-Cada push a la rama `main` despliega automáticamente gracias al workflow en `.github/workflows/deploy.yml`.
+Como el `index.html` tiene el código compilado adentro, para cambiar algo:
 
-### Configuración inicial (solo una vez)
+1. Edita `App.jsx` con el cambio deseado.
+2. Pide que te regeneren el `index.html` con el nuevo código.
+3. Sube ambos archivos al repo.
 
-1. En GitHub, ve a **Settings → Pages**.
-2. En **Source**, selecciona **GitHub Actions**.
-3. Haz push a `main` y espera 1-2 minutos.
+## Deploy
 
-### Sitio en producción
+GitHub Pages sirve `index.html` directamente desde la raíz del repo (rama `main`).
 
-https://felipeanali.github.io/organigramast/
+## Privacidad
 
-### Cambiar el nombre del repo
-
-Si algún día renombras el repo, edita la línea `base` en `vite.config.js`:
-
-```js
-export default defineConfig({
-  plugins: [react()],
-  base: "/nuevo-nombre/",
-});
-```
-
-## Estructura
-
-- `src/App.jsx` — componente principal
-- `src/constants.js` — paletas, dimensiones, CSS
-- `src/utils.js` — layout del árbol y helpers
-- `src/main.jsx` — entry point
-
-## Formato de archivos
-
-- **Maestro (xlsx/csv)**: el archivo de nómina original. Al importar detecta columnas automáticamente.
-- **Memoria portable (.orgmem)**: archivo con todo el trabajo guardado. Sube y baja desde la app — nada se guarda en el navegador.
+Esta app **NO guarda nada en el navegador**. Toda la información del personal se mantiene solo en memoria mientras la pestaña esté abierta. Usa el botón **💾 Guardar memoria** para descargar un archivo `.orgmem` con tu trabajo, y **📂 Cargar memoria** para recuperarlo después.
