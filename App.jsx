@@ -343,11 +343,19 @@ export default function App(){
      (cuando son >=3) se muestran como caja-lista única. Clave: conjunto ordenado de parentIds. ── */
   const MIN_GROUP_SIZE = 3;
   const autoGroups = useMemo(()=>{
+    const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
     const map=new Map();
     nodes.forEach(n=>{
       if(n.tipo!=="persona") return;
       const ps=parentsOf(n);
       if(ps.length===0) return;
+      /* v11 fix: solo agrupar cuando TODOS los jefes son PERSONAS (no sedes/grupos).
+         Los admins (hijos de sedes 🏢) siempre van como tarjeta grande con foto. */
+      const todosSonPersonas = ps.every(pid=>{
+        const jefe=byId[pid];
+        return jefe && jefe.tipo==="persona";
+      });
+      if(!todosSonPersonas) return;
       const key=[...ps].sort().join("|");
       if(!map.has(key)) map.set(key,{parents:[...ps].sort(),members:[]});
       map.get(key).members.push(n.id);

@@ -1,28 +1,23 @@
 # Organigramast v11 — Supertiendas Cañaveral
 
-## Novedad: Auto-agrupamiento en caja-lista
+## Regla de auto-agrupamiento (corregida)
 
-Cuando **3 o más** subordinados reportan al mismo conjunto de jefes, se agrupan
-automáticamente en una sola caja-lista compacta (sin fotos, solo nombre + cargo).
+La caja-lista aparece SOLO cuando:
+1. Son **3 o más** subordinados con los mismos jefes
+2. **TODOS los jefes son personas** (no sedes 🏢)
 
-- Si son 1 o 2 subordinados: aparecen como **tarjetas normales con foto** (sin cambios)
-- Si son ≥3 con mismo jefe: **caja-lista única** con header "N subordinados · mismo jefe"
+Esto significa:
+- **Admins** (hijos directos de SC PALMITEX, SC CENTENARIO, etc.) → SIEMPRE tarjeta grande con foto
+- **Subordinados de admins** (RG, FV, etc. que reportan a personas) → caja-lista si son ≥3 iguales
 
-### Cómo se ven las líneas
-Una línea gris fina desde cada jefe al **borde izquierdo de cada fila** dentro de la caja.
-Así sigues viendo claramente quién reporta a quién dentro del grupo.
-
-### Cómo editar/borrar dentro de la caja
-Clic en cualquier fila → se selecciona esa persona → aparecen botones ✎ (editar) y ✕ (eliminar).
-
-## Lo que NO cambió
-- Tarjetas grandes con foto siguen siendo el protagonismo cuando hay 1-2 subordinados
-- Multi-jefe sigue funcionando igual (del panel + del botón 🔗)
-- El modo ≡ manual para compactar hijos sigue disponible
-- El resto de la UI es idéntica a v10
+## Cómo se ve la caja-lista
+- Header: "N subordinados · mismo jefe"
+- Filas compactas con banda de color + nombre + cargo
+- Líneas grises finas desde cada jefe al borde izquierdo de cada fila
+- Clic en una fila → edit/eliminar esa persona
 
 ## Archivos
-- `index.html` — app compilada (lo que sirve GitHub Pages)
-- `App.jsx` — código fuente editable
+- `index.html` — app compilada
+- `App.jsx` — código fuente
 
 Sitio: https://felipeanali.github.io/organigramast/
