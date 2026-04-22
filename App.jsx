@@ -28,6 +28,15 @@ const NW=180, NH=168, NHG=52, GX=22, GY=40;
 const FOTO_SZ=84;
 const NHC=36; // altura nodo compacto (modo lista)
 const GYC=6;  // gap vertical entre nodos compactos apilados
+/* v11: caja-lista de subordinados auto-agrupados */
+const LW=240;       // ancho caja lista
+const LIST_ROW=36;  // altura por fila
+const LIST_HEAD=32; // header de la caja
+const LIST_PAD=8;   // padding vertical
+
+function listBoxHeight(memberCount){
+  return LIST_HEAD + memberCount * LIST_ROW + LIST_PAD;
+}
 
 /* v8: helper para obtener todos los padres de un nodo (soporta parentIds[] y parentId legacy) */
 function parentsOf(n){
@@ -42,20 +51,41 @@ function primaryParentOf(n){
   return ps[0] || "";
 }
 
-function buildLayout(nodes, compactSet){
+function buildLayout(nodes, compactSet, autoGroups){
   compactSet = compactSet || new Set();
+  autoGroups = autoGroups || {};
   if(!nodes.length) return {pos:{},W:600,H:300};
   const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
-  /* v8: ch usa el padre PRIMARIO para armar el árbol */
+
+  /* v11: mapa id -> groupKey (si es miembro de un auto-grupo) */
+  const memberToGroup={};
+  Object.entries(autoGroups).forEach(([key,g])=>{
+    g.members.forEach(mid=>{ memberToGroup[mid]=key; });
+  });
+  const groupRepresentative={};
+  Object.entries(autoGroups).forEach(([key,g])=>{
+    groupRepresentative[key]=g.members[0];
+  });
+  const isRepresentative=(id)=>{
+    const k=memberToGroup[id];
+    return k && groupRepresentative[k]===id;
+  };
+  const isNonRepMember=(id)=>{
+    const k=memberToGroup[id];
+    return k && groupRepresentative[k]!==id;
+  };
+
+  /* ch usa el padre PRIMARIO; miembros no-representantes se omiten del árbol */
   const ch=Object.fromEntries(nodes.map(n=>[n.id,[]]));
   const roots=[];
   nodes.forEach(n=>{
+    if(isNonRepMember(n.id)) return;
     const pp=primaryParentOf(n);
     if(pp && byId[pp]) ch[pp].push(n.id);
     else roots.push(n.id);
   });
 
-  /* ¿este nodo está bajo un ancestro compactado? (via padre primario) */
+  /* ¿este nodo está bajo un ancestro compactado? */
   const compactAncestor={};
   const findCompactAnc=id=>{
     if(compactAncestor[id]!==undefined) return compactAncestor[id];
@@ -71,26 +101,36 @@ function buildLayout(nodes, compactSet){
   const isCompact=id=>compactAncestor[id]!==null;
   const nodeHeight=id=>{
     if(isCompact(id)) return NHC;
+    if(isRepresentative(id)){
+      const k=memberToGroup[id];
+      return listBoxHeight(autoGroups[k].members.length);
+    }
     return byId[id]?.tipo==="grupo"?NHG:NH;
+  };
+  const nodeWidth=id=>{
+    if(isRepresentative(id)) return LW;
+    return NW;
   };
 
   const memo={};
   const sw=id=>{
     if(memo[id]!==undefined) return memo[id];
     const c=ch[id]||[];
-    if(compactSet.has(id) && c.length) return memo[id]=NW+GX;
-    if(isCompact(id)) return memo[id]=NW+GX;
-    return memo[id]=c.length ? Math.max(NW+GX, c.reduce((s,x)=>s+sw(x),0)) : NW+GX;
+    const selfWidth=nodeWidth(id)+GX;
+    if(compactSet.has(id) && c.length) return memo[id]=selfWidth;
+    if(isCompact(id)) return memo[id]=selfWidth;
+    return memo[id]=c.length ? Math.max(selfWidth, c.reduce((s,x)=>s+sw(x),0)) : selfWidth;
   };
   const pos={};
   const place=(id,lx,y)=>{
     const h=nodeHeight(id);
-    const s=sw(id); pos[id]={x:lx+(s-NW)/2,y,h,compact:isCompact(id)};
+    const w=nodeWidth(id);
+    const s=sw(id); pos[id]={x:lx+(s-w)/2,y,h,w,compact:isCompact(id)};
     const kids=ch[id]||[];
     if(!kids.length) return;
     if(compactSet.has(id)){
       let cy=y+h+GY;
-      kids.forEach(c=>{ place(c, lx+(s-NW)/2, cy); cy+=NHC+GYC; });
+      kids.forEach(c=>{ place(c, lx+(s-nodeWidth(c))/2, cy); cy+=NHC+GYC; });
     } else {
       let cx=lx;
       kids.forEach(c=>{place(c,cx,y+h+GY);cx+=sw(c);});
@@ -98,20 +138,34 @@ function buildLayout(nodes, compactSet){
   };
   let rx=GX; roots.forEach(r=>{place(r,rx,GY);rx+=sw(r)+GX;});
 
-  /* v8: para nodos con MÚLTIPLES jefes, reubicar X al centroide de las posiciones X de los padres.
-     Lo hacemos en orden top-down (por Y) para que los descendientes se reposicionen después. */
+  /* Reubicar al centroide de jefes: aplica tanto a representantes (caja-lista) como a nodos normales multi-jefe */
+  const repNodes = nodes
+    .filter(n => isRepresentative(n.id) && pos[n.id])
+    .sort((a,b)=> (pos[a.id]?.y||0) - (pos[b.id]?.y||0));
+  repNodes.forEach(n=>{
+    const parents=parentsOf(n).filter(pid=>pos[pid]);
+    if(parents.length<1) return;
+    const centerXs=parents.map(pid=>pos[pid].x + (pos[pid].w||NW)/2);
+    const avg=centerXs.reduce((s,x)=>s+x,0)/centerXs.length;
+    const newX=avg - LW/2;
+    const deltaX=newX - pos[n.id].x;
+    const mover=(id)=>{
+      pos[id].x += deltaX;
+      (ch[id]||[]).forEach(mover);
+    };
+    mover(n.id);
+  });
+
   const multiNodes = nodes
-    .filter(n => parentsOf(n).length>1 && pos[n.id])
+    .filter(n => !isRepresentative(n.id) && !isNonRepMember(n.id) && parentsOf(n).length>1 && pos[n.id])
     .sort((a,b)=> (pos[a.id]?.y||0) - (pos[b.id]?.y||0));
   multiNodes.forEach(n=>{
     const parents=parentsOf(n).filter(pid=>pos[pid]);
     if(parents.length<2) return;
-    /* centro X del conjunto de padres (usando centros de cada padre) */
-    const centerXs=parents.map(pid=>pos[pid].x + NW/2);
+    const centerXs=parents.map(pid=>pos[pid].x + (pos[pid].w||NW)/2);
     const avg=centerXs.reduce((s,x)=>s+x,0)/centerXs.length;
     const newX=avg - NW/2;
     const deltaX=newX - pos[n.id].x;
-    /* mover este nodo Y todos sus descendientes (primarios) la misma cantidad */
     const mover=(id)=>{
       pos[id].x += deltaX;
       (ch[id]||[]).forEach(mover);
@@ -122,9 +176,9 @@ function buildLayout(nodes, compactSet){
   const xs=Object.values(pos).map(p=>p.x), ys=Object.values(pos).map(p=>p.y);
   const mnx=Math.min(...xs)-GX, mny=Math.min(...ys)-GY;
   Object.keys(pos).forEach(id=>{pos[id].x-=mnx; pos[id].y-=mny;});
-  const W=Math.max(...Object.values(pos).map(p=>p.x))+NW+GX;
-  const H=Math.max(...Object.values(pos).map(p=>p.y+p.h))+GY;
-  return {pos,W,H};
+  const maxX=Math.max(...Object.values(pos).map(p=>p.x+(p.w||NW)));
+  const maxY=Math.max(...Object.values(pos).map(p=>p.y+p.h));
+  return {pos,W:maxX+GX,H:maxY+GY};
 }
 
 const ini=n=>(n||"").split(" ").map(w=>w[0]).filter(Boolean).slice(0,2).join("").toUpperCase()||"?";
@@ -285,7 +339,35 @@ export default function App(){
   },[grpForm.sourceCol,uniqueSedes,uniqueCargos,uniqueDepts]);
 
 
-  const {pos,W,H}=useMemo(()=>buildLayout(nodes,compactSet),[nodes,compactSet]);
+  /* ── v11: auto-agrupamiento. Subordinados que comparten EXACTAMENTE el mismo conjunto de jefes
+     (cuando son >=3) se muestran como caja-lista única. Clave: conjunto ordenado de parentIds. ── */
+  const MIN_GROUP_SIZE = 3;
+  const autoGroups = useMemo(()=>{
+    const map=new Map();
+    nodes.forEach(n=>{
+      if(n.tipo!=="persona") return;
+      const ps=parentsOf(n);
+      if(ps.length===0) return;
+      const key=[...ps].sort().join("|");
+      if(!map.has(key)) map.set(key,{parents:[...ps].sort(),members:[]});
+      map.get(key).members.push(n.id);
+    });
+    const groups={};
+    for(const [key,val] of map.entries()){
+      if(val.members.length>=MIN_GROUP_SIZE){
+        groups[key]=val;
+      }
+    }
+    return groups;
+  },[nodes]);
+
+  const groupedPersonIds = useMemo(()=>{
+    const s=new Set();
+    Object.values(autoGroups).forEach(g=>g.members.forEach(id=>s.add(id)));
+    return s;
+  },[autoGroups]);
+
+  const {pos,W,H}=useMemo(()=>buildLayout(nodes,compactSet,autoGroups),[nodes,compactSet,autoGroups]);
   const inChart=useMemo(()=>new Set(nodes.map(n=>n.id)),[nodes]);
 
   const rosterFiltered=useMemo(()=>{
@@ -424,12 +506,27 @@ export default function App(){
   const addPersona=r=>{
     if(inChart.has(r.id))return;
     if(nodes.length===0){ setNodes(p=>[...p,{...r,parentId:"",tipo:"persona"}]); return; }
-    setQuickAdd({person:r,parentId:"",q:""});
+    setQuickAdd({person:r,parentIds:[],q:""});
   };
   const confirmQuickAdd=()=>{
     if(!quickAdd)return;
-    setNodes(p=>[...p,{...quickAdd.person,parentId:quickAdd.parentId,tipo:"persona"}]);
+    const pids=quickAdd.parentIds||[];
+    const base={...quickAdd.person,tipo:"persona"};
+    delete base.parentId; delete base.parentIds;
+    if(pids.length===0) base.parentId="";
+    else if(pids.length===1) base.parentId=pids[0];
+    else base.parentIds=pids;
+    setNodes(p=>[...p,base]);
     setQuickAdd(null);
+  };
+  /* toggle un jefe en el quickAdd */
+  const toggleQuickAddParent=(pid)=>{
+    setQuickAdd(f=>{
+      if(!f) return f;
+      const cur=f.parentIds||[];
+      const nu = cur.includes(pid) ? cur.filter(x=>x!==pid) : [...cur, pid];
+      return {...f, parentIds:nu};
+    });
   };
 
   /* ── Agregar grupo ── */
@@ -707,14 +804,48 @@ export default function App(){
   /* v8: edges ahora es multi — una arista por cada par (padre, hijo) */
   const edges=useMemo(()=>{
     const arr=[];
+    /* helper: ¿n es miembro de un auto-grupo? → devuelve {rep, rowIndex} o null */
+    const memberInfo=(id)=>{
+      for(const [key,g] of Object.entries(autoGroups)){
+        const idx=g.members.indexOf(id);
+        if(idx>=0) return {rep:g.members[0], rowIndex:idx};
+      }
+      return null;
+    };
     nodes.forEach(n=>{
-      if(!pos[n.id]) return;
+      const info=memberInfo(n.id);
       const parents=parentsOf(n);
-      parents.forEach((pid,idx)=>{
+      /* Si n es miembro de un auto-grupo: dibujar línea a la fila específica dentro de la caja del representante */
+      if(info){
+        const repPos=pos[info.rep];
+        if(!repPos) return;
+        parents.forEach(pid=>{
+          if(!pos[pid]) return;
+          const p=pos[pid];
+          const ph=p.h||NH, pw=p.w||NW;
+          const x1=p.x+pw/2, y1=p.y+ph;
+          /* y2 = altura de la fila específica dentro de la caja */
+          const rowY = repPos.y + LIST_HEAD + info.rowIndex*LIST_ROW + LIST_ROW/2;
+          const x2 = repPos.x; // borde izquierdo de la caja
+          const y2 = rowY;
+          const active = sel===n.id || sel===pid;
+          arr.push({
+            key:`${pid}->${n.id}-row`,
+            /* curva suave hacia el borde izquierdo de la fila */
+            d:`M${x1} ${y1}C${x1} ${(y1+y2)/2} ${x2-30} ${y2} ${x2} ${y2}`,
+            active,
+            thin:true, // línea más fina para las filas
+          });
+        });
+        return;
+      }
+      /* Render normal: línea del padre al centro-top del nodo */
+      if(!pos[n.id]) return;
+      parents.forEach(pid=>{
         if(!pos[pid]) return;
         const p=pos[pid], c=pos[n.id];
-        const ph=p.h||NH;
-        const x1=p.x+NW/2, y1=p.y+ph, x2=c.x+NW/2, y2=c.y, my=(y1+y2)/2;
+        const ph=p.h||NH, pw=p.w||NW, cw=c.w||NW;
+        const x1=p.x+pw/2, y1=p.y+ph, x2=c.x+cw/2, y2=c.y, my=(y1+y2)/2;
         const active=sel===n.id||sel===pid;
         arr.push({
           key:`${pid}->${n.id}`,
@@ -725,7 +856,7 @@ export default function App(){
       });
     });
     return arr;
-  },[nodes,pos,sel]);
+  },[nodes,pos,sel,autoGroups]);
 
   const selNode=nodes.find(n=>n.id===sel);
   const editNode=nodes.find(n=>n.id===editId);
@@ -919,28 +1050,56 @@ export default function App(){
                         </div>
                         <button onClick={()=>setQuickAdd(null)} style={{background:"none",border:"none",cursor:"pointer",color:"#94A3B8",fontSize:16,padding:"0 4px"}}>✕</button>
                       </div>
-                      {/* Buscar jefe */}
+                      {/* Buscar jefes (múltiples) */}
                       <div style={{padding:"10px 14px"}}>
-                        <div style={{fontSize:12,fontWeight:600,color:"#0369A1",marginBottom:6}}>¿A quién reporta?</div>
-                        <input className="inp" value={quickAdd.q} onChange={e=>setQuickAdd(f=>({...f,q:e.target.value}))} placeholder="Buscar en el chart…" style={{marginBottom:6,borderColor:"#BAE6FD"}}/>
+                        <div style={{fontSize:12,fontWeight:600,color:"#0369A1",marginBottom:6}}>
+                          ¿A quién(es) reporta? {quickAdd.parentIds?.length>0 && <span style={{color:"#7E22CE"}}>({quickAdd.parentIds.length} seleccionado{quickAdd.parentIds.length!==1?"s":""})</span>}
+                        </div>
+
+                        {/* Chips de jefes ya seleccionados */}
+                        {quickAdd.parentIds?.length>0 && (
+                          <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:6}}>
+                            {quickAdd.parentIds.map(pid=>{
+                              const jefe=nodes.find(x=>x.id===pid);
+                              if(!jefe) return null;
+                              return(
+                                <div key={pid} style={{padding:"2px 5px 2px 8px",background:"#DCFCE7",border:"1px solid #22C55E",borderRadius:12,display:"flex",alignItems:"center",gap:4,fontSize:10}}>
+                                  <span>{jefe.tipo==="grupo"?"🏢":"👤"}</span>
+                                  <span style={{fontWeight:600,color:"#15803D",maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{jefe.nombre}</span>
+                                  <button onClick={()=>toggleQuickAddParent(pid)} style={{background:"none",border:"none",cursor:"pointer",color:"#22C55E",fontSize:12,padding:0,lineHeight:1}}>✕</button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <input className="inp" value={quickAdd.q} onChange={e=>setQuickAdd(f=>({...f,q:e.target.value}))} placeholder={quickAdd.parentIds?.length?"Buscar otro jefe…":"Buscar jefe en el chart…"} style={{marginBottom:6,borderColor:"#BAE6FD"}}/>
                         <div style={{maxHeight:140,overflowY:"auto",border:"1px solid #E2E8F0",borderRadius:8,background:"#fff",marginBottom:8}}>
                           {quickBossResults.length===0&&<div style={{padding:"10px 12px",fontSize:12,color:"#94A3B8"}}>Sin nodos en el chart aún</div>}
-                          {quickBossResults.map(n=>(
-                            <div key={n.id} onClick={()=>setQuickAdd(f=>({...f,parentId:n.id,q:""}))}
-                              style={{padding:"7px 10px",cursor:"pointer",borderBottom:"1px solid #F1F5F9",background:n.id===quickAdd.parentId?"#EFF6FF":"#fff",display:"flex",alignItems:"center",gap:8}}>
-                              <span style={{fontSize:13}}>{n.tipo==="grupo"?"🏢":"👤"}</span>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:12,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{n.nombre}</div>
-                                <div style={{fontSize:10,color:"#64748B"}}>{n.cargo||""}</div>
+                          {quickBossResults.map(n=>{
+                            const yaEs = (quickAdd.parentIds||[]).includes(n.id);
+                            return(
+                              <div key={n.id} onClick={()=>toggleQuickAddParent(n.id)}
+                                style={{padding:"7px 10px",cursor:"pointer",borderBottom:"1px solid #F1F5F9",background:yaEs?"#F0FDF4":"#fff",display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:13}}>{n.tipo==="grupo"?"🏢":"👤"}</span>
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:12,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{n.nombre}</div>
+                                  <div style={{fontSize:10,color:"#64748B"}}>{n.cargo||""}</div>
+                                </div>
+                                {yaEs ? <span style={{fontSize:14,color:"#15803D",fontWeight:700}}>✓</span> : <span style={{fontSize:14,color:"#CBD5E1"}}>＋</span>}
                               </div>
-                              {n.id===quickAdd.parentId&&<span style={{fontSize:14,color:"#3B82F6"}}>✓</span>}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
-                        {quickAdd.parentId&&(()=>{const p=nodes.find(x=>x.id===quickAdd.parentId);return p?<div style={{fontSize:11,color:"#0369A1",marginBottom:8,padding:"4px 8px",background:"#E0F2FE",borderRadius:6}}>Reporta a: <strong>{p.nombre}</strong></div>:null;})()}
+
+                        <div style={{fontSize:10,color:"#0369A1",marginBottom:8,lineHeight:1.5}}>💡 Clic en cada jefe para agregarlo/quitarlo. Puedes elegir varios.</div>
+
                         <div style={{display:"flex",gap:6}}>
-                          <button className="btn p" onClick={confirmQuickAdd} style={{flex:1,fontSize:12}}>{quickAdd.parentId?"✓ Agregar con conexión":"✓ Agregar al chart"}</button>
-                          <button onClick={()=>{setNodes(p=>[...p,{...quickAdd.person,parentId:"",tipo:"persona"}]);setQuickAdd(null);}} style={{padding:"5px 10px",borderRadius:8,border:"1px solid #E2E8F0",background:"#fff",cursor:"pointer",fontSize:11,color:"#64748B",whiteSpace:"nowrap"}}>Sin jefe</button>
+                          <button className="btn p" onClick={confirmQuickAdd} style={{flex:1,fontSize:12}}>
+                            {quickAdd.parentIds?.length>0
+                              ? `✓ Agregar con ${quickAdd.parentIds.length} jefe${quickAdd.parentIds.length!==1?"s":""}`
+                              : "✓ Agregar al chart (sin jefe)"}
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -1217,8 +1376,8 @@ export default function App(){
                 <g transform={`scale(${vp.s})`}>
                   {edges.map(e=>(
                     <path key={e.key} d={e.d}
-                      stroke={e.active?"#3B82F6":(e.multi?"#A855F7":"#94A3B8")}
-                      strokeWidth={e.active?2.5:(e.multi?1.5:1.5)}
+                      stroke={e.active?"#3B82F6":(e.thin?"#CBD5E1":(e.multi?"#A855F7":"#94A3B8"))}
+                      strokeWidth={e.active?2.5:(e.thin?1:1.5)}
                       strokeDasharray={e.multi?"5 4":undefined}
                       fill="none" strokeLinecap="round"/>
                   ))}
@@ -1229,8 +1388,80 @@ export default function App(){
                 const p=pos[n.id]; if(!p)return null;
                 const isSel=sel===n.id;
                 const nh=n.tipo==="grupo"?NHG:NH;
-                /* v10: vars comunes a grupo y persona */
                 const modoAsignar_g = assignBossFor && assignBossFor !== n.id;
+
+                /* v11: si es miembro NO representante de un auto-grupo, no se dibuja (está dentro de la caja) */
+                const gkey = (()=>{
+                  for(const [key,g] of Object.entries(autoGroups)){
+                    if(g.members.includes(n.id)) return key;
+                  }
+                  return null;
+                })();
+                const esRep = gkey && autoGroups[gkey].members[0]===n.id;
+                const esMiembroNoRep = gkey && !esRep;
+                if(esMiembroNoRep) return null;
+
+                /* v11: render de la CAJA-LISTA si es representante */
+                if(esRep){
+                  const grupo = autoGroups[gkey];
+                  const miembros = grupo.members.map(mid=>nodes.find(x=>x.id===mid)).filter(Boolean);
+                  const boxH = listBoxHeight(miembros.length);
+                  return(
+                    <div key={n.id} className="on"
+                      style={{left:vp.x+p.x*vp.s,top:vp.y+p.y*vp.s,width:LW*vp.s,height:boxH*vp.s}}>
+                      <div style={{
+                        width:LW,height:boxH,transform:`scale(${vp.s})`,transformOrigin:"top left",
+                        background:"#ffffff",
+                        border:"1.5px solid #CBD5E1",
+                        borderTop:"4px solid #94A3B8",
+                        borderRadius:10,
+                        boxShadow:"0 2px 8px rgba(15,23,42,.06)",
+                        display:"flex",flexDirection:"column",
+                        overflow:"hidden",
+                      }}>
+                        {/* Header de la caja */}
+                        <div style={{padding:"6px 10px",background:"#F8FAFC",borderBottom:"1px solid #E2E8F0",display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,fontWeight:700,color:"#64748B",textTransform:"uppercase",letterSpacing:"0.05em"}}>
+                            {miembros.length} subordinados
+                          </span>
+                          <span style={{fontSize:9,color:"#94A3B8"}}>· mismo jefe</span>
+                        </div>
+                        {/* Filas */}
+                        {miembros.map(m=>{
+                          const cm=col(m.area);
+                          const selRow = sel===m.id;
+                          return(
+                            <div key={m.id}
+                              onClick={e=>{e.stopPropagation();setSel(selRow?null:m.id);}}
+                              style={{
+                                padding:"6px 10px",
+                                borderBottom:"1px solid #F1F5F9",
+                                background:selRow?"#EFF6FF":"#fff",
+                                display:"flex",alignItems:"center",gap:8,
+                                height:LIST_ROW,
+                                cursor:"pointer",
+                                position:"relative",
+                              }}>
+                              <div style={{width:4,alignSelf:"stretch",background:cm.border,borderRadius:2,flexShrink:0,margin:"4px 0"}}/>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:11,fontWeight:700,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>{trunc(m.nombre,30)}</div>
+                                {m.cargo&&<div style={{fontSize:9,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>{trunc(m.cargo,34)}</div>}
+                              </div>
+                              {selRow && (
+                                <div style={{display:"flex",gap:2}}>
+                                  <div title="Editar" onClick={e=>{e.stopPropagation();openEdit(m);}} style={{width:20,height:20,borderRadius:4,background:cm.bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke={cm.text} strokeWidth="1.5" strokeLinejoin="round"/></svg>
+                                  </div>
+                                  <div title="Eliminar" onClick={e=>{e.stopPropagation();delNode(m.id);}} style={{width:20,height:20,borderRadius:4,background:"#FEF2F2",border:"1px solid #FCA5A5",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:10,color:"#DC2626"}}>✕</div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                }
 
                 if(n.tipo==="grupo"){
                   const g=gcol(n.colorIdx??0);

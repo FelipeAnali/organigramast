@@ -43,6 +43,13 @@ const NW = 180, NH = 168, NHG = 52, GX = 22, GY = 40;
 const FOTO_SZ = 84;
 const NHC = 36;
 const GYC = 6;
+const LW = 240;
+const LIST_ROW = 36;
+const LIST_HEAD = 32;
+const LIST_PAD = 8;
+function listBoxHeight(memberCount) {
+  return LIST_HEAD + memberCount * LIST_ROW + LIST_PAD;
+}
 function parentsOf(n) {
   if (!n) return [];
   if (Array.isArray(n.parentIds) && n.parentIds.length > 0) return n.parentIds.filter(Boolean);
@@ -53,13 +60,33 @@ function primaryParentOf(n) {
   const ps = parentsOf(n);
   return ps[0] || "";
 }
-function buildLayout(nodes, compactSet) {
+function buildLayout(nodes, compactSet, autoGroups) {
   compactSet = compactSet || /* @__PURE__ */ new Set();
+  autoGroups = autoGroups || {};
   if (!nodes.length) return { pos: {}, W: 600, H: 300 };
   const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const memberToGroup = {};
+  Object.entries(autoGroups).forEach(([key, g]) => {
+    g.members.forEach((mid) => {
+      memberToGroup[mid] = key;
+    });
+  });
+  const groupRepresentative = {};
+  Object.entries(autoGroups).forEach(([key, g]) => {
+    groupRepresentative[key] = g.members[0];
+  });
+  const isRepresentative = (id) => {
+    const k = memberToGroup[id];
+    return k && groupRepresentative[k] === id;
+  };
+  const isNonRepMember = (id) => {
+    const k = memberToGroup[id];
+    return k && groupRepresentative[k] !== id;
+  };
   const ch = Object.fromEntries(nodes.map((n) => [n.id, []]));
   const roots = [];
   nodes.forEach((n) => {
+    if (isNonRepMember(n.id)) return;
     const pp = primaryParentOf(n);
     if (pp && byId[pp]) ch[pp].push(n.id);
     else roots.push(n.id);
@@ -78,27 +105,37 @@ function buildLayout(nodes, compactSet) {
   const isCompact = (id) => compactAncestor[id] !== null;
   const nodeHeight = (id) => {
     if (isCompact(id)) return NHC;
+    if (isRepresentative(id)) {
+      const k = memberToGroup[id];
+      return listBoxHeight(autoGroups[k].members.length);
+    }
     return byId[id]?.tipo === "grupo" ? NHG : NH;
+  };
+  const nodeWidth = (id) => {
+    if (isRepresentative(id)) return LW;
+    return NW;
   };
   const memo = {};
   const sw = (id) => {
     if (memo[id] !== void 0) return memo[id];
     const c = ch[id] || [];
-    if (compactSet.has(id) && c.length) return memo[id] = NW + GX;
-    if (isCompact(id)) return memo[id] = NW + GX;
-    return memo[id] = c.length ? Math.max(NW + GX, c.reduce((s, x) => s + sw(x), 0)) : NW + GX;
+    const selfWidth = nodeWidth(id) + GX;
+    if (compactSet.has(id) && c.length) return memo[id] = selfWidth;
+    if (isCompact(id)) return memo[id] = selfWidth;
+    return memo[id] = c.length ? Math.max(selfWidth, c.reduce((s, x) => s + sw(x), 0)) : selfWidth;
   };
   const pos = {};
   const place = (id, lx, y) => {
     const h = nodeHeight(id);
+    const w = nodeWidth(id);
     const s = sw(id);
-    pos[id] = { x: lx + (s - NW) / 2, y, h, compact: isCompact(id) };
+    pos[id] = { x: lx + (s - w) / 2, y, h, w, compact: isCompact(id) };
     const kids = ch[id] || [];
     if (!kids.length) return;
     if (compactSet.has(id)) {
       let cy = y + h + GY;
       kids.forEach((c) => {
-        place(c, lx + (s - NW) / 2, cy);
+        place(c, lx + (s - nodeWidth(c)) / 2, cy);
         cy += NHC + GYC;
       });
     } else {
@@ -114,11 +151,25 @@ function buildLayout(nodes, compactSet) {
     place(r, rx, GY);
     rx += sw(r) + GX;
   });
-  const multiNodes = nodes.filter((n) => parentsOf(n).length > 1 && pos[n.id]).sort((a, b) => (pos[a.id]?.y || 0) - (pos[b.id]?.y || 0));
+  const repNodes = nodes.filter((n) => isRepresentative(n.id) && pos[n.id]).sort((a, b) => (pos[a.id]?.y || 0) - (pos[b.id]?.y || 0));
+  repNodes.forEach((n) => {
+    const parents = parentsOf(n).filter((pid) => pos[pid]);
+    if (parents.length < 1) return;
+    const centerXs = parents.map((pid) => pos[pid].x + (pos[pid].w || NW) / 2);
+    const avg = centerXs.reduce((s, x) => s + x, 0) / centerXs.length;
+    const newX = avg - LW / 2;
+    const deltaX = newX - pos[n.id].x;
+    const mover = (id) => {
+      pos[id].x += deltaX;
+      (ch[id] || []).forEach(mover);
+    };
+    mover(n.id);
+  });
+  const multiNodes = nodes.filter((n) => !isRepresentative(n.id) && !isNonRepMember(n.id) && parentsOf(n).length > 1 && pos[n.id]).sort((a, b) => (pos[a.id]?.y || 0) - (pos[b.id]?.y || 0));
   multiNodes.forEach((n) => {
     const parents = parentsOf(n).filter((pid) => pos[pid]);
     if (parents.length < 2) return;
-    const centerXs = parents.map((pid) => pos[pid].x + NW / 2);
+    const centerXs = parents.map((pid) => pos[pid].x + (pos[pid].w || NW) / 2);
     const avg = centerXs.reduce((s, x) => s + x, 0) / centerXs.length;
     const newX = avg - NW / 2;
     const deltaX = newX - pos[n.id].x;
@@ -134,9 +185,9 @@ function buildLayout(nodes, compactSet) {
     pos[id].x -= mnx;
     pos[id].y -= mny;
   });
-  const W = Math.max(...Object.values(pos).map((p) => p.x)) + NW + GX;
-  const H = Math.max(...Object.values(pos).map((p) => p.y + p.h)) + GY;
-  return { pos, W, H };
+  const maxX = Math.max(...Object.values(pos).map((p) => p.x + (p.w || NW)));
+  const maxY = Math.max(...Object.values(pos).map((p) => p.y + p.h));
+  return { pos, W: maxX + GX, H: maxY + GY };
 }
 const ini = (n) => (n || "").split(" ").map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
 const trunc = (s = "", mx = 22) => s.length > mx ? s.slice(0, mx - 1) + "\u2026" : s;
@@ -279,7 +330,31 @@ function App() {
     if (grpForm.sourceCol === "dept") return uniqueDepts;
     return [];
   }, [grpForm.sourceCol, uniqueSedes, uniqueCargos, uniqueDepts]);
-  const { pos, W, H } = useMemo(() => buildLayout(nodes, compactSet), [nodes, compactSet]);
+  const MIN_GROUP_SIZE = 3;
+  const autoGroups = useMemo(() => {
+    const map = /* @__PURE__ */ new Map();
+    nodes.forEach((n) => {
+      if (n.tipo !== "persona") return;
+      const ps = parentsOf(n);
+      if (ps.length === 0) return;
+      const key = [...ps].sort().join("|");
+      if (!map.has(key)) map.set(key, { parents: [...ps].sort(), members: [] });
+      map.get(key).members.push(n.id);
+    });
+    const groups = {};
+    for (const [key, val] of map.entries()) {
+      if (val.members.length >= MIN_GROUP_SIZE) {
+        groups[key] = val;
+      }
+    }
+    return groups;
+  }, [nodes]);
+  const groupedPersonIds = useMemo(() => {
+    const s = /* @__PURE__ */ new Set();
+    Object.values(autoGroups).forEach((g) => g.members.forEach((id) => s.add(id)));
+    return s;
+  }, [autoGroups]);
+  const { pos, W, H } = useMemo(() => buildLayout(nodes, compactSet, autoGroups), [nodes, compactSet, autoGroups]);
   const inChart = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
   const rosterFiltered = useMemo(() => {
     let r = roster;
@@ -431,12 +506,27 @@ function App() {
       setNodes((p) => [...p, { ...r, parentId: "", tipo: "persona" }]);
       return;
     }
-    setQuickAdd({ person: r, parentId: "", q: "" });
+    setQuickAdd({ person: r, parentIds: [], q: "" });
   };
   const confirmQuickAdd = () => {
     if (!quickAdd) return;
-    setNodes((p) => [...p, { ...quickAdd.person, parentId: quickAdd.parentId, tipo: "persona" }]);
+    const pids = quickAdd.parentIds || [];
+    const base = { ...quickAdd.person, tipo: "persona" };
+    delete base.parentId;
+    delete base.parentIds;
+    if (pids.length === 0) base.parentId = "";
+    else if (pids.length === 1) base.parentId = pids[0];
+    else base.parentIds = pids;
+    setNodes((p) => [...p, base]);
     setQuickAdd(null);
+  };
+  const toggleQuickAddParent = (pid) => {
+    setQuickAdd((f) => {
+      if (!f) return f;
+      const cur = f.parentIds || [];
+      const nu = cur.includes(pid) ? cur.filter((x) => x !== pid) : [...cur, pid];
+      return { ...f, parentIds: nu };
+    });
   };
   const addGrupo = () => {
     const nombre = grpForm.source === "columna" ? grpForm.sourceVal : grpForm.nombre;
@@ -733,14 +823,45 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
   const onMU = () => setDrag(false);
   const edges = useMemo(() => {
     const arr = [];
+    const memberInfo = (id) => {
+      for (const [key, g] of Object.entries(autoGroups)) {
+        const idx = g.members.indexOf(id);
+        if (idx >= 0) return { rep: g.members[0], rowIndex: idx };
+      }
+      return null;
+    };
     nodes.forEach((n) => {
-      if (!pos[n.id]) return;
+      const info = memberInfo(n.id);
       const parents = parentsOf(n);
-      parents.forEach((pid, idx) => {
+      if (info) {
+        const repPos = pos[info.rep];
+        if (!repPos) return;
+        parents.forEach((pid) => {
+          if (!pos[pid]) return;
+          const p = pos[pid];
+          const ph = p.h || NH, pw = p.w || NW;
+          const x1 = p.x + pw / 2, y1 = p.y + ph;
+          const rowY = repPos.y + LIST_HEAD + info.rowIndex * LIST_ROW + LIST_ROW / 2;
+          const x2 = repPos.x;
+          const y2 = rowY;
+          const active = sel === n.id || sel === pid;
+          arr.push({
+            key: `${pid}->${n.id}-row`,
+            /* curva suave hacia el borde izquierdo de la fila */
+            d: `M${x1} ${y1}C${x1} ${(y1 + y2) / 2} ${x2 - 30} ${y2} ${x2} ${y2}`,
+            active,
+            thin: true
+            // línea más fina para las filas
+          });
+        });
+        return;
+      }
+      if (!pos[n.id]) return;
+      parents.forEach((pid) => {
         if (!pos[pid]) return;
         const p = pos[pid], c = pos[n.id];
-        const ph = p.h || NH;
-        const x1 = p.x + NW / 2, y1 = p.y + ph, x2 = c.x + NW / 2, y2 = c.y, my = (y1 + y2) / 2;
+        const ph = p.h || NH, pw = p.w || NW, cw = c.w || NW;
+        const x1 = p.x + pw / 2, y1 = p.y + ph, x2 = c.x + cw / 2, y2 = c.y, my = (y1 + y2) / 2;
         const active = sel === n.id || sel === pid;
         arr.push({
           key: `${pid}->${n.id}`,
@@ -751,7 +872,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
       });
     });
     return arr;
-  }, [nodes, pos, sel]);
+  }, [nodes, pos, sel, autoGroups]);
   const selNode = nodes.find((n) => n.id === sel);
   const editNode = nodes.find((n) => n.id === editId);
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", height: 660, fontFamily: "system-ui,-apple-system,sans-serif", background: "#F8FAFC", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("style", null, CSS), assignBossFor && (() => {
@@ -801,23 +922,24 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
       on ? "\u2713 " : "",
       v
     );
-  })))), filtersActivos > 0 && /* @__PURE__ */ React.createElement("button", { onClick: () => setRosterFilters({ sede: [], cargo: [], dept: [] }), style: { background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 7, color: "#DC2626", fontSize: 11, cursor: "pointer", padding: "4px 10px", alignSelf: "flex-start" } }, "\u2715 Limpiar filtros (", filtersActivos, ")")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8", marginTop: 5 } }, rosterQ || filtersActivos > 0 ? `${rosterFiltered.length} resultado${rosterFiltered.length !== 1 ? "s" : ""}` : roster.length > 80 ? "Primeros 80" : `${rosterFiltered.length} personas`, " \xB7 ", /* @__PURE__ */ React.createElement("span", { style: { color: "#3B82F6" } }, inChart.size, " en chart"))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto" } }, quickAdd && /* @__PURE__ */ React.createElement("div", { style: { margin: "8px 14px", border: "1px solid #BAE6FD", borderRadius: 12, overflow: "hidden", background: "#F0F9FF" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px", background: "#fff", borderBottom: "1px solid #BAE6FD", display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 36, height: 36, borderRadius: "50%", background: "#EFF6FF", border: "1.5px solid #3B82F6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#1E40AF" } }, ini(quickAdd.person.nombre))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, quickAdd.person.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B" } }, quickAdd.person.cargo || "")), /* @__PURE__ */ React.createElement("button", { onClick: () => setQuickAdd(null), style: { background: "none", border: "none", cursor: "pointer", color: "#94A3B8", fontSize: 16, padding: "0 4px" } }, "\u2715")), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0369A1", marginBottom: 6 } }, "\xBFA qui\xE9n reporta?"), /* @__PURE__ */ React.createElement("input", { className: "inp", value: quickAdd.q, onChange: (e) => setQuickAdd((f) => ({ ...f, q: e.target.value })), placeholder: "Buscar en el chart\u2026", style: { marginBottom: 6, borderColor: "#BAE6FD" } }), /* @__PURE__ */ React.createElement("div", { style: { maxHeight: 140, overflowY: "auto", border: "1px solid #E2E8F0", borderRadius: 8, background: "#fff", marginBottom: 8 } }, quickBossResults.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 12px", fontSize: 12, color: "#94A3B8" } }, "Sin nodos en el chart a\xFAn"), quickBossResults.map((n) => /* @__PURE__ */ React.createElement(
-    "div",
-    {
-      key: n.id,
-      onClick: () => setQuickAdd((f) => ({ ...f, parentId: n.id, q: "" })),
-      style: { padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #F1F5F9", background: n.id === quickAdd.parentId ? "#EFF6FF" : "#fff", display: "flex", alignItems: "center", gap: 8 }
-    },
-    /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13 } }, n.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"),
-    /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, n.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#64748B" } }, n.cargo || "")),
-    n.id === quickAdd.parentId && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, color: "#3B82F6" } }, "\u2713")
-  ))), quickAdd.parentId && (() => {
-    const p = nodes.find((x) => x.id === quickAdd.parentId);
-    return p ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#0369A1", marginBottom: 8, padding: "4px 8px", background: "#E0F2FE", borderRadius: 6 } }, "Reporta a: ", /* @__PURE__ */ React.createElement("strong", null, p.nombre)) : null;
-  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: confirmQuickAdd, style: { flex: 1, fontSize: 12 } }, quickAdd.parentId ? "\u2713 Agregar con conexi\xF3n" : "\u2713 Agregar al chart"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
-    setNodes((p) => [...p, { ...quickAdd.person, parentId: "", tipo: "persona" }]);
-    setQuickAdd(null);
-  }, style: { padding: "5px 10px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#fff", cursor: "pointer", fontSize: 11, color: "#64748B", whiteSpace: "nowrap" } }, "Sin jefe")))), !quickAdd && rosterFiltered.map((r) => {
+  })))), filtersActivos > 0 && /* @__PURE__ */ React.createElement("button", { onClick: () => setRosterFilters({ sede: [], cargo: [], dept: [] }), style: { background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 7, color: "#DC2626", fontSize: 11, cursor: "pointer", padding: "4px 10px", alignSelf: "flex-start" } }, "\u2715 Limpiar filtros (", filtersActivos, ")")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8", marginTop: 5 } }, rosterQ || filtersActivos > 0 ? `${rosterFiltered.length} resultado${rosterFiltered.length !== 1 ? "s" : ""}` : roster.length > 80 ? "Primeros 80" : `${rosterFiltered.length} personas`, " \xB7 ", /* @__PURE__ */ React.createElement("span", { style: { color: "#3B82F6" } }, inChart.size, " en chart"))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto" } }, quickAdd && /* @__PURE__ */ React.createElement("div", { style: { margin: "8px 14px", border: "1px solid #BAE6FD", borderRadius: 12, overflow: "hidden", background: "#F0F9FF" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px", background: "#fff", borderBottom: "1px solid #BAE6FD", display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 36, height: 36, borderRadius: "50%", background: "#EFF6FF", border: "1.5px solid #3B82F6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#1E40AF" } }, ini(quickAdd.person.nombre))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, quickAdd.person.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B" } }, quickAdd.person.cargo || "")), /* @__PURE__ */ React.createElement("button", { onClick: () => setQuickAdd(null), style: { background: "none", border: "none", cursor: "pointer", color: "#94A3B8", fontSize: 16, padding: "0 4px" } }, "\u2715")), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0369A1", marginBottom: 6 } }, "\xBFA qui\xE9n(es) reporta? ", quickAdd.parentIds?.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { color: "#7E22CE" } }, "(", quickAdd.parentIds.length, " seleccionado", quickAdd.parentIds.length !== 1 ? "s" : "", ")")), quickAdd.parentIds?.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 6 } }, quickAdd.parentIds.map((pid) => {
+    const jefe = nodes.find((x) => x.id === pid);
+    if (!jefe) return null;
+    return /* @__PURE__ */ React.createElement("div", { key: pid, style: { padding: "2px 5px 2px 8px", background: "#DCFCE7", border: "1px solid #22C55E", borderRadius: 12, display: "flex", alignItems: "center", gap: 4, fontSize: 10 } }, /* @__PURE__ */ React.createElement("span", null, jefe.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600, color: "#15803D", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, jefe.nombre), /* @__PURE__ */ React.createElement("button", { onClick: () => toggleQuickAddParent(pid), style: { background: "none", border: "none", cursor: "pointer", color: "#22C55E", fontSize: 12, padding: 0, lineHeight: 1 } }, "\u2715"));
+  })), /* @__PURE__ */ React.createElement("input", { className: "inp", value: quickAdd.q, onChange: (e) => setQuickAdd((f) => ({ ...f, q: e.target.value })), placeholder: quickAdd.parentIds?.length ? "Buscar otro jefe\u2026" : "Buscar jefe en el chart\u2026", style: { marginBottom: 6, borderColor: "#BAE6FD" } }), /* @__PURE__ */ React.createElement("div", { style: { maxHeight: 140, overflowY: "auto", border: "1px solid #E2E8F0", borderRadius: 8, background: "#fff", marginBottom: 8 } }, quickBossResults.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 12px", fontSize: 12, color: "#94A3B8" } }, "Sin nodos en el chart a\xFAn"), quickBossResults.map((n) => {
+    const yaEs = (quickAdd.parentIds || []).includes(n.id);
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        key: n.id,
+        onClick: () => toggleQuickAddParent(n.id),
+        style: { padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #F1F5F9", background: yaEs ? "#F0FDF4" : "#fff", display: "flex", alignItems: "center", gap: 8 }
+      },
+      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13 } }, n.tipo === "grupo" ? "\u{1F3E2}" : "\u{1F464}"),
+      /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, n.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#64748B" } }, n.cargo || "")),
+      yaEs ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, color: "#15803D", fontWeight: 700 } }, "\u2713") : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, color: "#CBD5E1" } }, "\uFF0B")
+    );
+  })), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#0369A1", marginBottom: 8, lineHeight: 1.5 } }, "\u{1F4A1} Clic en cada jefe para agregarlo/quitarlo. Puedes elegir varios."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: confirmQuickAdd, style: { flex: 1, fontSize: 12 } }, quickAdd.parentIds?.length > 0 ? `\u2713 Agregar con ${quickAdd.parentIds.length} jefe${quickAdd.parentIds.length !== 1 ? "s" : ""}` : "\u2713 Agregar al chart (sin jefe)")))), !quickAdd && rosterFiltered.map((r) => {
     const ya = inChart.has(r.id);
     return /* @__PURE__ */ React.createElement("div", { key: r.id, className: `rrow${ya ? " added" : ""}`, onClick: () => {
       if (!ya) addPersona(r);
@@ -900,8 +1022,8 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
         {
           key: e.key,
           d: e.d,
-          stroke: e.active ? "#3B82F6" : e.multi ? "#A855F7" : "#94A3B8",
-          strokeWidth: e.active ? 2.5 : e.multi ? 1.5 : 1.5,
+          stroke: e.active ? "#3B82F6" : e.thin ? "#CBD5E1" : e.multi ? "#A855F7" : "#94A3B8",
+          strokeWidth: e.active ? 2.5 : e.thin ? 1 : 1.5,
           strokeDasharray: e.multi ? "5 4" : void 0,
           fill: "none",
           strokeLinecap: "round"
@@ -912,6 +1034,75 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
         const isSel = sel === n.id;
         const nh = n.tipo === "grupo" ? NHG : NH;
         const modoAsignar_g = assignBossFor && assignBossFor !== n.id;
+        const gkey = (() => {
+          for (const [key, g] of Object.entries(autoGroups)) {
+            if (g.members.includes(n.id)) return key;
+          }
+          return null;
+        })();
+        const esRep = gkey && autoGroups[gkey].members[0] === n.id;
+        const esMiembroNoRep = gkey && !esRep;
+        if (esMiembroNoRep) return null;
+        if (esRep) {
+          const grupo = autoGroups[gkey];
+          const miembros = grupo.members.map((mid) => nodes.find((x) => x.id === mid)).filter(Boolean);
+          const boxH = listBoxHeight(miembros.length);
+          return /* @__PURE__ */ React.createElement(
+            "div",
+            {
+              key: n.id,
+              className: "on",
+              style: { left: vp.x + p.x * vp.s, top: vp.y + p.y * vp.s, width: LW * vp.s, height: boxH * vp.s }
+            },
+            /* @__PURE__ */ React.createElement("div", { style: {
+              width: LW,
+              height: boxH,
+              transform: `scale(${vp.s})`,
+              transformOrigin: "top left",
+              background: "#ffffff",
+              border: "1.5px solid #CBD5E1",
+              borderTop: "4px solid #94A3B8",
+              borderRadius: 10,
+              boxShadow: "0 2px 8px rgba(15,23,42,.06)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden"
+            } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "6px 10px", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.05em" } }, miembros.length, " subordinados"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: "#94A3B8" } }, "\xB7 mismo jefe")), miembros.map((m) => {
+              const cm = col(m.area);
+              const selRow = sel === m.id;
+              return /* @__PURE__ */ React.createElement(
+                "div",
+                {
+                  key: m.id,
+                  onClick: (e) => {
+                    e.stopPropagation();
+                    setSel(selRow ? null : m.id);
+                  },
+                  style: {
+                    padding: "6px 10px",
+                    borderBottom: "1px solid #F1F5F9",
+                    background: selRow ? "#EFF6FF" : "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    height: LIST_ROW,
+                    cursor: "pointer",
+                    position: "relative"
+                  }
+                },
+                /* @__PURE__ */ React.createElement("div", { style: { width: 4, alignSelf: "stretch", background: cm.border, borderRadius: 2, flexShrink: 0, margin: "4px 0" } }),
+                /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(m.nombre, 30)), m.cargo && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 9, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(m.cargo, 34))),
+                selRow && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 2 } }, /* @__PURE__ */ React.createElement("div", { title: "Editar", onClick: (e) => {
+                  e.stopPropagation();
+                  openEdit(m);
+                }, style: { width: 20, height: 20, borderRadius: 4, background: cm.bg, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" } }, /* @__PURE__ */ React.createElement("svg", { width: "10", height: "10", viewBox: "0 0 16 16", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M11 2l3 3-9 9H2v-3L11 2z", stroke: cm.text, strokeWidth: "1.5", strokeLinejoin: "round" }))), /* @__PURE__ */ React.createElement("div", { title: "Eliminar", onClick: (e) => {
+                  e.stopPropagation();
+                  delNode(m.id);
+                }, style: { width: 20, height: 20, borderRadius: 4, background: "#FEF2F2", border: "1px solid #FCA5A5", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 10, color: "#DC2626" } }, "\u2715"))
+              );
+            }))
+          );
+        }
         if (n.tipo === "grupo") {
           const g = gcol(n.colorIdx ?? 0);
           const esJefeActDelOrigen_g = modoAsignar_g && (() => {
