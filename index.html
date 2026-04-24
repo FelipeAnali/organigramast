@@ -264,6 +264,8 @@ function App() {
   const [quickAdd, setQuickAdd] = useState(null);
   const [compactSet, setCompactSet] = useState(() => /* @__PURE__ */ new Set());
   const [assignBossFor, setAssignBossFor] = useState(null);
+  const [addToListKey, setAddToListKey] = useState(null);
+  const [addToListQ, setAddToListQ] = useState("");
   const [dirty, setDirty] = useState(false);
   const [memFileName, setMemFileName] = useState("");
   const memRef = useRef(null);
@@ -706,8 +708,43 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
     }
     return false;
   };
+  const assignIsList = assignBossFor && typeof assignBossFor === "string" && assignBossFor.startsWith("list:");
+  const assignListKey = assignIsList ? assignBossFor.slice(5) : null;
+  const assignListMembers = assignIsList && autoGroups[assignListKey] ? autoGroups[assignListKey].members : [];
   const onAssignBossClick = (targetId) => {
     if (!assignBossFor) return false;
+    if (assignIsList) {
+      if (assignListMembers.includes(targetId)) {
+        alert("No puedes elegir a un miembro de la lista como jefe de la misma lista");
+        return true;
+      }
+      for (const mid of assignListMembers) {
+        if (esDescendiente(targetId, mid)) {
+          alert("No puedes elegir un subordinado como jefe (crear\xEDa un ciclo)");
+          return true;
+        }
+      }
+      const byId_ = Object.fromEntries(nodes.map((n) => [n.id, n]));
+      const todosLoTienen = assignListMembers.every((mid) => parentsOf(byId_[mid]).includes(targetId));
+      setNodes((p) => p.map((n) => {
+        if (!assignListMembers.includes(n.id)) return n;
+        const ps = parentsOf(n);
+        let next;
+        if (todosLoTienen) {
+          next = ps.filter((x) => x !== targetId);
+        } else {
+          next = ps.includes(targetId) ? ps : [...ps, targetId];
+        }
+        const updated = { ...n };
+        delete updated.parentId;
+        delete updated.parentIds;
+        if (next.length === 0) updated.parentId = "";
+        else if (next.length === 1) updated.parentId = next[0];
+        else updated.parentIds = next;
+        return updated;
+      }));
+      return true;
+    }
     if (targetId === assignBossFor) {
       setAssignBossFor(null);
       return true;
@@ -882,9 +919,36 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
   const selNode = nodes.find((n) => n.id === sel);
   const editNode = nodes.find((n) => n.id === editId);
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", height: 660, fontFamily: "system-ui,-apple-system,sans-serif", background: "#F8FAFC", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("style", null, CSS), assignBossFor && (() => {
+    if (assignIsList) {
+      const miembros = assignListMembers.map((mid) => nodes.find((x) => x.id === mid)).filter(Boolean);
+      const conteo = {};
+      miembros.forEach((m) => parentsOf(m).forEach((pid) => {
+        conteo[pid] = (conteo[pid] || 0) + 1;
+      }));
+      const jefesComunes = Object.entries(conteo).filter(([, n]) => n === miembros.length).map(([pid]) => pid).map((pid) => nodes.find((x) => x.id === pid)).filter(Boolean);
+      return /* @__PURE__ */ React.createElement("div", { style: { background: "#DBEAFE", borderBottom: "2px solid #3B82F6", padding: "8px 14px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 18 } }, "\u{1F4CB}\u{1F517}"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, fontSize: 13, color: "#1E3A8A", minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("strong", null, "Asignar jefes a LISTA de ", miembros.length, " personas")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, marginTop: 2 } }, "Lo que marques se AGREGA a los jefes actuales de cada miembro \xB7 Clic de nuevo en un jefe com\xFAn para quitarlo a todos \xB7", /* @__PURE__ */ React.createElement("kbd", { style: { margin: "0 4px", padding: "1px 6px", background: "#fff", border: "1px solid #3B82F6", borderRadius: 4, fontSize: 10, fontFamily: "monospace" } }, "Esc"), "o ", /* @__PURE__ */ React.createElement("strong", null, "Hecho")), jefesComunes.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 600 } }, "Jefes comunes (", jefesComunes.length, "):"), jefesComunes.map((j) => /* @__PURE__ */ React.createElement("span", { key: j.id, style: { fontSize: 10, padding: "2px 7px", background: "#fff", border: "1px solid #3B82F6", borderRadius: 10, color: "#1E3A8A", fontWeight: 600 } }, j.tipo === "grupo" ? "\u{1F3E2} " : "", j.nombre)))), /* @__PURE__ */ React.createElement("button", { className: "btn p", style: { fontSize: 12 }, onClick: () => setAssignBossFor(null) }, "\u2713 Hecho"));
+    }
     const origen = nodes.find((x) => x.id === assignBossFor);
     const jefesActuales = origen ? parentsOf(origen).map((pid) => nodes.find((x) => x.id === pid)).filter(Boolean) : [];
     return /* @__PURE__ */ React.createElement("div", { style: { background: "#FEF3C7", borderBottom: "2px solid #F59E0B", padding: "8px 14px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 18 } }, "\u{1F517}"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, fontSize: 13, color: "#78350F", minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("strong", null, "Asignar jefes a:"), " ", origen?.nombre || "\u2014"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, marginTop: 2 } }, "Clic en un nodo para ", /* @__PURE__ */ React.createElement("strong", null, "agregar/quitar"), " como jefe \xB7 Puedes asignar varios \xB7", /* @__PURE__ */ React.createElement("kbd", { style: { margin: "0 4px", padding: "1px 6px", background: "#fff", border: "1px solid #D97706", borderRadius: 4, fontSize: 10, fontFamily: "monospace" } }, "Esc"), "o ", /* @__PURE__ */ React.createElement("strong", null, "Hecho"), " para salir"), jefesActuales.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 600 } }, "Actuales (", jefesActuales.length, "):"), jefesActuales.map((j) => /* @__PURE__ */ React.createElement("span", { key: j.id, style: { fontSize: 10, padding: "2px 7px", background: "#fff", border: "1px solid #D97706", borderRadius: 10, color: "#78350F", fontWeight: 600 } }, j.tipo === "grupo" ? "\u{1F3E2} " : "", j.nombre)))), /* @__PURE__ */ React.createElement("button", { className: "btn p", style: { fontSize: 12 }, onClick: () => setAssignBossFor(null) }, "\u2713 Hecho"));
+  })(), addToListKey && autoGroups[addToListKey] && (() => {
+    const grupo = autoGroups[addToListKey];
+    const jefes = grupo.parents.map((pid) => nodes.find((x) => x.id === pid)).filter(Boolean);
+    const q = addToListQ.trim().toLowerCase();
+    const yaEnChart = new Set(nodes.map((n) => n.id));
+    const candidatos = (q ? roster.filter((r) => !yaEnChart.has(r.id) && [r.nombre, r.cargo, r.area].some((v) => (v || "").toLowerCase().includes(q))) : []).slice(0, 30);
+    const addToList = (r) => {
+      const base = { ...r, tipo: "persona" };
+      delete base.parentId;
+      delete base.parentIds;
+      if (grupo.parents.length === 1) base.parentId = grupo.parents[0];
+      else base.parentIds = [...grupo.parents];
+      setNodes((p) => [...p, base]);
+    };
+    return /* @__PURE__ */ React.createElement("div", { onClick: () => setAddToListKey(null), style: { position: "fixed", inset: 0, background: "rgba(15,23,42,.5)", zIndex: 99, display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: 480, maxWidth: "90vw", maxHeight: "80vh", background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,.3)", display: "flex", flexDirection: "column", overflow: "hidden" } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "14px 18px", borderBottom: "1px solid #E2E8F0", background: "#F0FDF4" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "#0F172A", marginBottom: 4 } }, "\u2795 Agregar persona a esta lista"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "#64748B" } }, "Heredar\xE1 autom\xE1ticamente estos ", jefes.length, " jefe", jefes.length !== 1 ? "s" : "", ":"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 } }, jefes.map((j) => /* @__PURE__ */ React.createElement("span", { key: j.id, style: { fontSize: 11, padding: "3px 9px", background: "#fff", border: "1px solid #22C55E", borderRadius: 10, color: "#15803D", fontWeight: 600 } }, j.tipo === "grupo" ? "\u{1F3E2} " : "\u{1F464} ", j.nombre)))), /* @__PURE__ */ React.createElement("div", { style: { padding: "12px 18px" } }, /* @__PURE__ */ React.createElement("input", { autoFocus: true, className: "inp", placeholder: "Buscar persona en el maestro (nombre, cargo, sede)\u2026", value: addToListQ, onChange: (e) => setAddToListQ(e.target.value) })), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "0 8px 8px" } }, !q && /* @__PURE__ */ React.createElement("div", { style: { padding: "20px 18px", textAlign: "center", fontSize: 12, color: "#94A3B8" } }, "Escribe para buscar\u2026"), q && candidatos.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "20px 18px", textAlign: "center", fontSize: 12, color: "#94A3B8" } }, "Sin resultados o ya est\xE1n en el chart"), candidatos.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, onClick: () => {
+      addToList(r);
+      setAddToListQ("");
+    }, style: { padding: "8px 12px", cursor: "pointer", borderRadius: 8, display: "flex", alignItems: "center", gap: 10, margin: "2px 0" }, onMouseEnter: (e) => e.currentTarget.style.background = "#F1F5F9", onMouseLeave: (e) => e.currentTarget.style.background = "" }, /* @__PURE__ */ React.createElement("div", { style: { width: 32, height: 32, borderRadius: "50%", background: "#EFF6FF", border: "1.5px solid #3B82F6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#1E40AF" } }, ini(r.nombre))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B" } }, r.cargo || "", r.area ? " \xB7 " + r.area : "")), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, color: "#22C55E", fontWeight: 700 } }, "\uFF0B")))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 18px", borderTop: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F8FAFC" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#64748B" } }, "Lista actual: ", grupo.members.length, " personas"), /* @__PURE__ */ React.createElement("button", { onClick: () => setAddToListKey(null), style: { padding: "6px 14px", borderRadius: 8, border: "1px solid #CBD5E1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 } }, "Cerrar"))));
   })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
     setRosterQ("");
     setAddTab("persona");
@@ -1066,14 +1130,38 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
               transform: `scale(${vp.s})`,
               transformOrigin: "top left",
               background: "#ffffff",
-              border: "1.5px solid #CBD5E1",
-              borderTop: "4px solid #94A3B8",
+              border: `1.5px solid ${assignBossFor === `list:${gkey}` ? "#3B82F6" : "#CBD5E1"}`,
+              borderTop: `4px solid ${assignBossFor === `list:${gkey}` ? "#3B82F6" : "#94A3B8"}`,
               borderRadius: 10,
-              boxShadow: "0 2px 8px rgba(15,23,42,.06)",
+              boxShadow: assignBossFor === `list:${gkey}` ? "0 0 0 3px #DBEAFE, 0 2px 8px rgba(59,130,246,.3)" : "0 2px 8px rgba(15,23,42,.06)",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden"
-            } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "6px 10px", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.05em" } }, miembros.length, " subordinados"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: "#94A3B8" } }, "\xB7 mismo jefe")), miembros.map((m) => {
+            } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "6px 10px", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.05em" } }, miembros.length, " subordinados"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: "#94A3B8" } }, "\xB7 mismo jefe"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement(
+              "div",
+              {
+                title: "Asignar jefes a TODA la lista",
+                onClick: (e) => {
+                  e.stopPropagation();
+                  setAssignBossFor(`list:${gkey}`);
+                  setSel(null);
+                },
+                style: { width: 22, height: 22, borderRadius: 5, background: "#FEF3C7", border: "1px solid #F59E0B", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 11 }
+              },
+              "\u{1F517}"
+            ), /* @__PURE__ */ React.createElement(
+              "div",
+              {
+                title: "Agregar persona a esta lista (hereda los mismos jefes)",
+                onClick: (e) => {
+                  e.stopPropagation();
+                  setAddToListKey(gkey);
+                  setAddToListQ("");
+                },
+                style: { width: 22, height: 22, borderRadius: 5, background: "#DCFCE7", border: "1px solid #22C55E", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#15803D" }
+              },
+              "\uFF0B"
+            )), miembros.map((m) => {
               const cm = col(m.area);
               const selRow = sel === m.id;
               return /* @__PURE__ */ React.createElement(

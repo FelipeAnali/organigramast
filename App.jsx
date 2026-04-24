@@ -268,6 +268,9 @@ export default function App(){
   /* ── v7: modo "asignar jefe visual" — cuando está activo, el próximo clic en un nodo del canvas
      define el nuevo jefe de assignBossFor ── */
   const [assignBossFor, setAssignBossFor] = useState(null); // id de la persona a la que le estamos buscando jefe
+  /* v11: agregar persona a caja-lista (hereda jefes) */
+  const [addToListKey, setAddToListKey] = useState(null);
+  const [addToListQ, setAddToListQ] = useState("");
 
   /* ── v5: memoria portable (sin localStorage) ── */
   const [dirty, setDirty] = useState(false);
@@ -693,12 +696,58 @@ export default function App(){
     return false;
   };
 
-  /* ── v8: toggle de jefe: clic en un jefe ya asignado → lo quita; clic en uno nuevo → lo agrega.
-     Si queda sin jefes → pasa a raíz. Permanece en modo asignar hasta Esc / botón Hecho. ── */
+  /* v11: helper — ¿assignBossFor apunta a una caja-lista? */
+  const assignIsList = assignBossFor && typeof assignBossFor==="string" && assignBossFor.startsWith("list:");
+  const assignListKey = assignIsList ? assignBossFor.slice(5) : null;
+  const assignListMembers = assignIsList && autoGroups[assignListKey] ? autoGroups[assignListKey].members : [];
+
+  /* ── v8+v11: toggle de jefe. Soporta:
+     - assignBossFor = "<id persona>" → toggle en esa persona
+     - assignBossFor = "list:<groupKey>" → toggle EN TODOS los miembros de la caja-lista (agrega si falta a alguno) ── */
   const onAssignBossClick=(targetId)=>{
     if(!assignBossFor) return false;
+
+    /* Modo lista: asignar a todos los miembros del grupo */
+    if(assignIsList){
+      if(assignListMembers.includes(targetId)){
+        alert("No puedes elegir a un miembro de la lista como jefe de la misma lista");
+        return true;
+      }
+      /* Ciclos: verificar que targetId no sea descendiente de NINGÚN miembro */
+      for(const mid of assignListMembers){
+        if(esDescendiente(targetId,mid)){
+          alert("No puedes elegir un subordinado como jefe (crearía un ciclo)");
+          return true;
+        }
+      }
+      /* ¿todos los miembros ya tienen targetId como jefe? → toggle off para todos.
+         ¿alguno no lo tiene? → agregarlo a los que no. (comportamiento AGREGAR) */
+      const byId_=Object.fromEntries(nodes.map(n=>[n.id,n]));
+      const todosLoTienen = assignListMembers.every(mid=>parentsOf(byId_[mid]).includes(targetId));
+      setNodes(p=>p.map(n=>{
+        if(!assignListMembers.includes(n.id)) return n;
+        const ps=parentsOf(n);
+        let next;
+        if(todosLoTienen){
+          /* quitarlo */
+          next=ps.filter(x=>x!==targetId);
+        } else {
+          /* agregarlo si no lo tiene */
+          next = ps.includes(targetId) ? ps : [...ps, targetId];
+        }
+        const updated={...n};
+        delete updated.parentId;
+        delete updated.parentIds;
+        if(next.length===0) updated.parentId="";
+        else if(next.length===1) updated.parentId=next[0];
+        else updated.parentIds=next;
+        return updated;
+      }));
+      return true;
+    }
+
+    /* Modo persona (igual que antes) */
     if(targetId===assignBossFor){
-      /* clic en uno mismo → salir del modo */
       setAssignBossFor(null);
       return true;
     }
@@ -711,13 +760,10 @@ export default function App(){
       const ps=parentsOf(n);
       let next;
       if(ps.includes(targetId)){
-        /* toggle off */
         next=ps.filter(x=>x!==targetId);
       } else {
-        /* toggle on */
         next=[...ps,targetId];
       }
-      /* actualizar el nodo: usar parentIds cuando hay varios, parentId cuando hay 0 o 1 */
       const updated={...n};
       delete updated.parentId;
       delete updated.parentIds;
@@ -730,7 +776,6 @@ export default function App(){
       }
       return updated;
     }));
-    /* NO salimos del modo automáticamente — el usuario puede seguir agregando/quitando */
     return true;
   };
   /* cancelar con Escape */
@@ -873,8 +918,41 @@ export default function App(){
     <div style={{display:"flex",flexDirection:"column",height:660,fontFamily:"system-ui,-apple-system,sans-serif",background:"#F8FAFC",overflow:"hidden"}}>
       <style>{CSS}</style>
 
-      {/* v8: Banner modo asignar jefe (con multi-jefe toggle) */}
+      {/* v8+v11: Banner modo asignar jefe (persona individual O lista completa) */}
       {assignBossFor && (()=>{
+        if(assignIsList){
+          /* Modo lista */
+          const miembros = assignListMembers.map(mid=>nodes.find(x=>x.id===mid)).filter(Boolean);
+          /* jefes COMUNES (que todos los miembros ya tienen) */
+          const conteo={};
+          miembros.forEach(m=>parentsOf(m).forEach(pid=>{conteo[pid]=(conteo[pid]||0)+1;}));
+          const jefesComunes = Object.entries(conteo).filter(([,n])=>n===miembros.length).map(([pid])=>pid).map(pid=>nodes.find(x=>x.id===pid)).filter(Boolean);
+          return(
+            <div style={{background:"#DBEAFE",borderBottom:"2px solid #3B82F6",padding:"8px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0,flexWrap:"wrap"}}>
+              <span style={{fontSize:18}}>📋🔗</span>
+              <div style={{flex:1,fontSize:13,color:"#1E3A8A",minWidth:0}}>
+                <div><strong>Asignar jefes a LISTA de {miembros.length} personas</strong></div>
+                <div style={{fontSize:11,marginTop:2}}>
+                  Lo que marques se AGREGA a los jefes actuales de cada miembro · Clic de nuevo en un jefe común para quitarlo a todos ·
+                  <kbd style={{margin:"0 4px",padding:"1px 6px",background:"#fff",border:"1px solid #3B82F6",borderRadius:4,fontSize:10,fontFamily:"monospace"}}>Esc</kbd>
+                  o <strong>Hecho</strong>
+                </div>
+                {jefesComunes.length>0 && (
+                  <div style={{marginTop:4,display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
+                    <span style={{fontSize:11,fontWeight:600}}>Jefes comunes ({jefesComunes.length}):</span>
+                    {jefesComunes.map(j=>(
+                      <span key={j.id} style={{fontSize:10,padding:"2px 7px",background:"#fff",border:"1px solid #3B82F6",borderRadius:10,color:"#1E3A8A",fontWeight:600}}>
+                        {j.tipo==="grupo"?"🏢 ":""}{j.nombre}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button className="btn p" style={{fontSize:12}} onClick={()=>setAssignBossFor(null)}>✓ Hecho</button>
+            </div>
+          );
+        }
+        /* Modo persona individual */
         const origen=nodes.find(x=>x.id===assignBossFor);
         const jefesActuales = origen ? parentsOf(origen).map(pid=>nodes.find(x=>x.id===pid)).filter(Boolean) : [];
         return(
@@ -899,6 +977,62 @@ export default function App(){
               )}
             </div>
             <button className="btn p" style={{fontSize:12}} onClick={()=>setAssignBossFor(null)}>✓ Hecho</button>
+          </div>
+        );
+      })()}
+
+      {/* v11: Modal "Agregar persona a esta lista" */}
+      {addToListKey && autoGroups[addToListKey] && (()=>{
+        const grupo=autoGroups[addToListKey];
+        const jefes=grupo.parents.map(pid=>nodes.find(x=>x.id===pid)).filter(Boolean);
+        const q=addToListQ.trim().toLowerCase();
+        const yaEnChart=new Set(nodes.map(n=>n.id));
+        const candidatos = (q ? roster.filter(r=>!yaEnChart.has(r.id) && [r.nombre,r.cargo,r.area].some(v=>(v||"").toLowerCase().includes(q))) : []).slice(0,30);
+        const addToList=(r)=>{
+          const base={...r,tipo:"persona"};
+          delete base.parentId; delete base.parentIds;
+          if(grupo.parents.length===1) base.parentId=grupo.parents[0];
+          else base.parentIds=[...grupo.parents];
+          setNodes(p=>[...p,base]);
+        };
+        return(
+          <div onClick={()=>setAddToListKey(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.5)",zIndex:99,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div onClick={e=>e.stopPropagation()} style={{width:480,maxWidth:"90vw",maxHeight:"80vh",background:"#fff",borderRadius:14,boxShadow:"0 20px 60px rgba(0,0,0,.3)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+              <div style={{padding:"14px 18px",borderBottom:"1px solid #E2E8F0",background:"#F0FDF4"}}>
+                <div style={{fontSize:15,fontWeight:700,color:"#0F172A",marginBottom:4}}>➕ Agregar persona a esta lista</div>
+                <div style={{fontSize:12,color:"#64748B"}}>Heredará automáticamente estos {jefes.length} jefe{jefes.length!==1?"s":""}:</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
+                  {jefes.map(j=>(
+                    <span key={j.id} style={{fontSize:11,padding:"3px 9px",background:"#fff",border:"1px solid #22C55E",borderRadius:10,color:"#15803D",fontWeight:600}}>
+                      {j.tipo==="grupo"?"🏢 ":"👤 "}{j.nombre}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div style={{padding:"12px 18px"}}>
+                <input autoFocus className="inp" placeholder="Buscar persona en el maestro (nombre, cargo, sede)…" value={addToListQ} onChange={e=>setAddToListQ(e.target.value)}/>
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"0 8px 8px"}}>
+                {!q && <div style={{padding:"20px 18px",textAlign:"center",fontSize:12,color:"#94A3B8"}}>Escribe para buscar…</div>}
+                {q && candidatos.length===0 && <div style={{padding:"20px 18px",textAlign:"center",fontSize:12,color:"#94A3B8"}}>Sin resultados o ya están en el chart</div>}
+                {candidatos.map(r=>(
+                  <div key={r.id} onClick={()=>{addToList(r);setAddToListQ("");}} style={{padding:"8px 12px",cursor:"pointer",borderRadius:8,display:"flex",alignItems:"center",gap:10,margin:"2px 0"}} onMouseEnter={e=>e.currentTarget.style.background="#F1F5F9"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                    <div style={{width:32,height:32,borderRadius:"50%",background:"#EFF6FF",border:"1.5px solid #3B82F6",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      <span style={{fontSize:10,fontWeight:700,color:"#1E40AF"}}>{ini(r.nombre)}</span>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.nombre}</div>
+                      <div style={{fontSize:11,color:"#64748B"}}>{r.cargo||""}{r.area?" · "+r.area:""}</div>
+                    </div>
+                    <span style={{fontSize:16,color:"#22C55E",fontWeight:700}}>＋</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{padding:"10px 18px",borderTop:"1px solid #E2E8F0",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#F8FAFC"}}>
+                <span style={{fontSize:11,color:"#64748B"}}>Lista actual: {grupo.members.length} personas</span>
+                <button onClick={()=>setAddToListKey(null)} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#fff",cursor:"pointer",fontSize:12,fontWeight:600}}>Cerrar</button>
+              </div>
+            </div>
           </div>
         );
       })()}
@@ -1420,10 +1554,10 @@ export default function App(){
                       <div style={{
                         width:LW,height:boxH,transform:`scale(${vp.s})`,transformOrigin:"top left",
                         background:"#ffffff",
-                        border:"1.5px solid #CBD5E1",
-                        borderTop:"4px solid #94A3B8",
+                        border:`1.5px solid ${assignBossFor===`list:${gkey}`?"#3B82F6":"#CBD5E1"}`,
+                        borderTop:`4px solid ${assignBossFor===`list:${gkey}`?"#3B82F6":"#94A3B8"}`,
                         borderRadius:10,
-                        boxShadow:"0 2px 8px rgba(15,23,42,.06)",
+                        boxShadow:assignBossFor===`list:${gkey}`?"0 0 0 3px #DBEAFE, 0 2px 8px rgba(59,130,246,.3)":"0 2px 8px rgba(15,23,42,.06)",
                         display:"flex",flexDirection:"column",
                         overflow:"hidden",
                       }}>
@@ -1433,6 +1567,19 @@ export default function App(){
                             {miembros.length} subordinados
                           </span>
                           <span style={{fontSize:9,color:"#94A3B8"}}>· mismo jefe</span>
+                          <div style={{flex:1}}/>
+                          {/* v11: botón 🔗 asignar jefes a toda la lista */}
+                          <div title="Asignar jefes a TODA la lista"
+                            onClick={e=>{e.stopPropagation();setAssignBossFor(`list:${gkey}`);setSel(null);}}
+                            style={{width:22,height:22,borderRadius:5,background:"#FEF3C7",border:"1px solid #F59E0B",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:11}}>
+                            🔗
+                          </div>
+                          {/* v11: botón + agregar persona a esta lista */}
+                          <div title="Agregar persona a esta lista (hereda los mismos jefes)"
+                            onClick={e=>{e.stopPropagation();setAddToListKey(gkey);setAddToListQ("");}}
+                            style={{width:22,height:22,borderRadius:5,background:"#DCFCE7",border:"1px solid #22C55E",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:13,fontWeight:700,color:"#15803D"}}>
+                            ＋
+                          </div>
                         </div>
                         {/* Filas */}
                         {miembros.map(m=>{
