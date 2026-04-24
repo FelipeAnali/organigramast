@@ -1,34 +1,39 @@
-# Organigramast v11 — Supertiendas Cañaveral
+# Organigramast v11.1 — Supertiendas Cañaveral
 
-## Novedades sobre la caja-lista
+## ⚠️ Problema de caché del navegador
 
-Ahora puedes operar sobre TODA la lista con 2 botones en su header:
+Si al subir esta versión NO VES los filtros en el modal, es caché del navegador.
+Desde v11.1 verás una etiqueta "v11.1" gris al lado del título "Organigrama" arriba a la izquierda.
+**Si no la ves → estás viendo una versión vieja cacheada.**
 
-### 🔗 Conectar lista a varios jefes (de un clic)
-Clic en 🔗 (header de la caja-lista amarillo) → banner azul arriba: "Asignar jefes a LISTA de N personas".
-- Clic en cualquier jefe (persona o sede 🏢) → se AGREGA ese jefe a TODOS los miembros de la lista.
-- Clic en un jefe que ya tienen todos → se quita a todos.
-- Los jefes que ya tenían los miembros se RESPETAN (solo añades, no sobrescribes).
-- `Esc` o "✓ Hecho" para salir.
+### Cómo forzar recarga
+- Chrome/Edge/Firefox: `Ctrl + Shift + R` (Windows/Linux) o `Cmd + Shift + R` (Mac)
+- O abre la página en incógnito: `Ctrl + Shift + N`
+- O borra el caché del sitio: F12 → pestaña Network → check "Disable cache"
 
-Banner azul (lista) vs banner amarillo (persona individual) — queda clarísimo qué estás afectando.
+También agregué meta-headers de no-cache al HTML para que no vuelva a pasar.
 
-### ➕ Agregar persona a la lista (hereda jefes)
-Clic en ➕ (header de la caja-lista, verde) → abre modal.
-- Busca por nombre, cargo o sede en el maestro (3748 personas).
-- Clic en un resultado → la persona se agrega al chart con los mismos jefes de la lista.
-- Si la lista tiene 3+ miembros compartiendo jefes, el nuevo se suma automáticamente al grupo.
+## Qué trae v11.1
 
-## Todo lo anterior sigue igual
-- Tarjetas grandes con foto para admins (hijos de sedes 🏢)
-- Caja-lista solo cuando ≥3 subordinados comparten jefes personas
-- Multi-jefe individual con 🔗 del nodo
-- Modo ≡ manual para compactar hijos
-- Memoria portable `.orgmem`
+### Modal "➕ Agregar a lista" con filtros y jefes extra
+
+**Abrir el modal**: clic en el botón ➕ verde del header de cualquier caja-lista.
+
+**Lo que deberías ver dentro del modal** (de arriba a abajo):
+1. 🟢 Header verde con los jefes actuales como chips
+2. 🔵 Sección colapsable "🔗 Agregar más jefes a esta lista" (fondo azul)
+3. 🔍 Input de búsqueda "Buscar persona por nombre, cargo, sede…"
+4. 🏙 Details "Sedes" (colapsable)
+5. 💼 Details "Cargos" (colapsable)
+6. 🗂 Details "Depto" (colapsable, si hay)
+7. 📋 Lista de resultados filtrados
+8. Footer con contador + botón Cerrar
+
+Los 3 details de filtros se expanden al darles clic en el header gris. Cada uno muestra chips clickeables multi-selección.
 
 ## Archivos
 
-- `index.html` — app compilada (GitHub Pages)
+- `index.html` — app compilada v11.1 con cache-busting
 - `App.jsx` — código fuente
 
 Sitio: https://felipeanali.github.io/organigramast/

@@ -271,6 +271,10 @@ export default function App(){
   /* v11: agregar persona a caja-lista (hereda jefes) */
   const [addToListKey, setAddToListKey] = useState(null);
   const [addToListQ, setAddToListQ] = useState("");
+  /* v11.1: filtros y jefes extra en el modal */
+  const [addToListFilters, setAddToListFilters] = useState({sede:[], cargo:[], dept:[]});
+  const [addToListExtraBosses, setAddToListExtraBosses] = useState([]); // ids de jefes extra a agregar a TODA la lista + nuevas personas
+  const [addToListBossQ, setAddToListBossQ] = useState("");
 
   /* ── v5: memoria portable (sin localStorage) ── */
   const [dirty, setDirty] = useState(false);
@@ -981,56 +985,226 @@ export default function App(){
         );
       })()}
 
-      {/* v11: Modal "Agregar persona a esta lista" */}
+      {/* v11.1: Modal "Agregar persona a esta lista" — con filtros y gestión de jefes extra */}
       {addToListKey && autoGroups[addToListKey] && (()=>{
         const grupo=autoGroups[addToListKey];
-        const jefes=grupo.parents.map(pid=>nodes.find(x=>x.id===pid)).filter(Boolean);
-        const q=addToListQ.trim().toLowerCase();
-        const yaEnChart=new Set(nodes.map(n=>n.id));
-        const candidatos = (q ? roster.filter(r=>!yaEnChart.has(r.id) && [r.nombre,r.cargo,r.area].some(v=>(v||"").toLowerCase().includes(q))) : []).slice(0,30);
+        const jefesBase = grupo.parents.map(pid=>nodes.find(x=>x.id===pid)).filter(Boolean);
+        const jefesExtra = addToListExtraBosses.map(pid=>nodes.find(x=>x.id===pid)).filter(Boolean);
+        const jefesFinal = [...grupo.parents, ...addToListExtraBosses];
+        const jefesFinalNodes = [...jefesBase, ...jefesExtra];
+
+        /* Opciones de filtro dinámicas del roster */
+        const sedeOptions = [...new Set(roster.map(r=>r.area).filter(Boolean))].sort();
+        const cargoOptions = [...new Set(roster.map(r=>r.cargo).filter(Boolean))].sort();
+        const deptOptions = [...new Set(roster.map(r=>r.dept).filter(Boolean))].sort();
+
+        const q = addToListQ.trim().toLowerCase();
+        const yaEnChart = new Set(nodes.map(n=>n.id));
+
+        /* Candidatos: aplicar filtros + búsqueda */
+        const filtrados = roster.filter(r=>{
+          if(yaEnChart.has(r.id)) return false;
+          if(addToListFilters.sede.length && !addToListFilters.sede.includes(r.area)) return false;
+          if(addToListFilters.cargo.length && !addToListFilters.cargo.includes(r.cargo)) return false;
+          if(addToListFilters.dept.length && !addToListFilters.dept.includes(r.dept)) return false;
+          if(q && ![r.nombre,r.cargo,r.area,r.dept].some(v=>(v||"").toLowerCase().includes(q))) return false;
+          return true;
+        });
+        const hayFiltros = q || addToListFilters.sede.length || addToListFilters.cargo.length || addToListFilters.dept.length;
+        const candidatos = filtrados.slice(0,30);
+        const totalFiltrados = filtrados.length;
+
+        /* Búsqueda de jefes extra: entre nodos del chart */
+        const bossQ_ = addToListBossQ.trim().toLowerCase();
+        const jefesDisponibles = bossQ_
+          ? nodes.filter(n=>!jefesFinal.includes(n.id) && [n.nombre,n.cargo,n.area].some(v=>(v||"").toLowerCase().includes(bossQ_))).slice(0,15)
+          : [];
+
         const addToList=(r)=>{
           const base={...r,tipo:"persona"};
           delete base.parentId; delete base.parentIds;
-          if(grupo.parents.length===1) base.parentId=grupo.parents[0];
-          else base.parentIds=[...grupo.parents];
+          if(jefesFinal.length===1) base.parentId=jefesFinal[0];
+          else if(jefesFinal.length>1) base.parentIds=[...jefesFinal];
           setNodes(p=>[...p,base]);
         };
+
+        /* Aplicar jefes extra a los miembros EXISTENTES de la lista cuando se cierra el modal */
+        const cerrarYAplicar=()=>{
+          if(addToListExtraBosses.length>0){
+            setNodes(p=>p.map(n=>{
+              if(!grupo.members.includes(n.id)) return n;
+              const ps=parentsOf(n);
+              const next=[...ps];
+              addToListExtraBosses.forEach(pid=>{ if(!next.includes(pid)) next.push(pid); });
+              const upd={...n};
+              delete upd.parentId; delete upd.parentIds;
+              if(next.length===1) upd.parentId=next[0];
+              else upd.parentIds=next;
+              return upd;
+            }));
+          }
+          setAddToListKey(null);
+          setAddToListExtraBosses([]);
+          setAddToListBossQ("");
+          setAddToListQ("");
+          setAddToListFilters({sede:[],cargo:[],dept:[]});
+        };
+
+        const toggleFilter=(tipo,val)=>{
+          setAddToListFilters(f=>{
+            const arr=f[tipo];
+            const next = arr.includes(val) ? arr.filter(x=>x!==val) : [...arr,val];
+            return {...f,[tipo]:next};
+          });
+        };
+        const limpiarFiltros=()=>setAddToListFilters({sede:[],cargo:[],dept:[]});
+        const totalFiltros = addToListFilters.sede.length+addToListFilters.cargo.length+addToListFilters.dept.length;
+
         return(
-          <div onClick={()=>setAddToListKey(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.5)",zIndex:99,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <div onClick={e=>e.stopPropagation()} style={{width:480,maxWidth:"90vw",maxHeight:"80vh",background:"#fff",borderRadius:14,boxShadow:"0 20px 60px rgba(0,0,0,.3)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div onClick={cerrarYAplicar} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.5)",zIndex:99,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div onClick={e=>e.stopPropagation()} style={{width:560,maxWidth:"92vw",maxHeight:"88vh",background:"#fff",borderRadius:14,boxShadow:"0 20px 60px rgba(0,0,0,.3)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+              {/* Header con info de jefes */}
               <div style={{padding:"14px 18px",borderBottom:"1px solid #E2E8F0",background:"#F0FDF4"}}>
                 <div style={{fontSize:15,fontWeight:700,color:"#0F172A",marginBottom:4}}>➕ Agregar persona a esta lista</div>
-                <div style={{fontSize:12,color:"#64748B"}}>Heredará automáticamente estos {jefes.length} jefe{jefes.length!==1?"s":""}:</div>
+                <div style={{fontSize:12,color:"#64748B"}}>Las personas agregadas heredarán estos {jefesFinalNodes.length} jefe{jefesFinalNodes.length!==1?"s":""}:</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
-                  {jefes.map(j=>(
+                  {jefesBase.map(j=>(
                     <span key={j.id} style={{fontSize:11,padding:"3px 9px",background:"#fff",border:"1px solid #22C55E",borderRadius:10,color:"#15803D",fontWeight:600}}>
                       {j.tipo==="grupo"?"🏢 ":"👤 "}{j.nombre}
                     </span>
                   ))}
+                  {jefesExtra.map(j=>(
+                    <span key={j.id} style={{fontSize:11,padding:"3px 4px 3px 9px",background:"#DBEAFE",border:"1px solid #3B82F6",borderRadius:10,color:"#1E40AF",fontWeight:600,display:"inline-flex",alignItems:"center",gap:4}}>
+                      {j.tipo==="grupo"?"🏢 ":"👤 "}{j.nombre}
+                      <button onClick={()=>setAddToListExtraBosses(a=>a.filter(x=>x!==j.id))} style={{background:"none",border:"none",cursor:"pointer",color:"#3B82F6",fontSize:13,padding:"0 2px",lineHeight:1}}>✕</button>
+                    </span>
+                  ))}
                 </div>
               </div>
-              <div style={{padding:"12px 18px"}}>
-                <input autoFocus className="inp" placeholder="Buscar persona en el maestro (nombre, cargo, sede)…" value={addToListQ} onChange={e=>setAddToListQ(e.target.value)}/>
+
+              {/* Agregar más jefes */}
+              <details style={{borderBottom:"1px solid #E2E8F0"}}>
+                <summary style={{padding:"8px 18px",cursor:"pointer",fontSize:12,fontWeight:600,color:"#1E40AF",background:"#EFF6FF",display:"flex",alignItems:"center",gap:6,userSelect:"none"}}>
+                  <span style={{fontSize:14}}>🔗</span>
+                  <span>Agregar más jefes a esta lista</span>
+                  {addToListExtraBosses.length>0 && <span style={{marginLeft:"auto",background:"#3B82F6",color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:10,fontWeight:700}}>+{addToListExtraBosses.length}</span>}
+                </summary>
+                <div style={{padding:"10px 18px",background:"#F8FAFC"}}>
+                  <input className="inp" placeholder="Buscar jefe en el chart (nombre, cargo, sede)…" value={addToListBossQ} onChange={e=>setAddToListBossQ(e.target.value)} style={{marginBottom:6,fontSize:12}}/>
+                  {bossQ_ && jefesDisponibles.length===0 && <div style={{fontSize:11,color:"#94A3B8",padding:"6px 2px"}}>Sin resultados entre nodos del chart</div>}
+                  {jefesDisponibles.length>0 && (
+                    <div style={{maxHeight:140,overflowY:"auto",border:"1px solid #E2E8F0",borderRadius:6,background:"#fff"}}>
+                      {jefesDisponibles.map(n=>(
+                        <div key={n.id} onClick={()=>{setAddToListExtraBosses(a=>[...a,n.id]);setAddToListBossQ("");}}
+                          style={{padding:"6px 10px",cursor:"pointer",borderBottom:"1px solid #F1F5F9",display:"flex",alignItems:"center",gap:8}}
+                          onMouseEnter={e=>e.currentTarget.style.background="#F0F9FF"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                          <span style={{fontSize:12}}>{n.tipo==="grupo"?"🏢":"👤"}</span>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{n.nombre}</div>
+                            {n.cargo && <div style={{fontSize:10,color:"#64748B"}}>{n.cargo}</div>}
+                          </div>
+                          <span style={{fontSize:13,color:"#3B82F6",fontWeight:700}}>＋</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{fontSize:10,color:"#64748B",marginTop:6,lineHeight:1.4}}>💡 Los jefes que agregues aquí se aplicarán a los <strong>{grupo.members.length} miembros actuales</strong> y a los nuevos al cerrar este modal.</div>
+                </div>
+              </details>
+
+              {/* Filtros + búsqueda */}
+              <div style={{padding:"10px 18px",borderBottom:"1px solid #E2E8F0"}}>
+                <input autoFocus className="inp" placeholder="Buscar persona por nombre, cargo, sede…" value={addToListQ} onChange={e=>setAddToListQ(e.target.value)} style={{marginBottom:8}}/>
+
+                {/* Chips de filtros colapsables */}
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {/* Sedes */}
+                  <details>
+                    <summary style={{padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:600,color:"#334155",background:"#F1F5F9",borderRadius:6,display:"flex",alignItems:"center",gap:6,userSelect:"none"}}>
+                      <span>🏙 Sedes</span>
+                      {addToListFilters.sede.length>0 && <span style={{background:"#3B82F6",color:"#fff",padding:"1px 6px",borderRadius:8,fontSize:9}}>{addToListFilters.sede.length}</span>}
+                      <span style={{marginLeft:"auto",fontSize:9,color:"#64748B"}}>{sedeOptions.length}</span>
+                    </summary>
+                    <div style={{padding:"6px 0",display:"flex",flexWrap:"wrap",gap:3,maxHeight:100,overflowY:"auto"}}>
+                      {sedeOptions.map(s=>{
+                        const active=addToListFilters.sede.includes(s);
+                        return(
+                          <span key={s} onClick={()=>toggleFilter("sede",s)} style={{fontSize:10,padding:"2px 8px",borderRadius:10,border:`1px solid ${active?"#3B82F6":"#CBD5E1"}`,background:active?"#EFF6FF":"#fff",color:active?"#1E40AF":"#475569",cursor:"pointer",fontWeight:active?600:500,whiteSpace:"nowrap"}}>{s}</span>
+                        );
+                      })}
+                    </div>
+                  </details>
+                  {/* Cargos */}
+                  <details>
+                    <summary style={{padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:600,color:"#334155",background:"#F1F5F9",borderRadius:6,display:"flex",alignItems:"center",gap:6,userSelect:"none"}}>
+                      <span>💼 Cargos</span>
+                      {addToListFilters.cargo.length>0 && <span style={{background:"#3B82F6",color:"#fff",padding:"1px 6px",borderRadius:8,fontSize:9}}>{addToListFilters.cargo.length}</span>}
+                      <span style={{marginLeft:"auto",fontSize:9,color:"#64748B"}}>{cargoOptions.length}</span>
+                    </summary>
+                    <div style={{padding:"6px 0",display:"flex",flexWrap:"wrap",gap:3,maxHeight:120,overflowY:"auto"}}>
+                      {cargoOptions.map(c=>{
+                        const active=addToListFilters.cargo.includes(c);
+                        return(
+                          <span key={c} onClick={()=>toggleFilter("cargo",c)} style={{fontSize:10,padding:"2px 8px",borderRadius:10,border:`1px solid ${active?"#3B82F6":"#CBD5E1"}`,background:active?"#EFF6FF":"#fff",color:active?"#1E40AF":"#475569",cursor:"pointer",fontWeight:active?600:500,whiteSpace:"nowrap"}}>{c}</span>
+                        );
+                      })}
+                    </div>
+                  </details>
+                  {/* Depto */}
+                  {deptOptions.length>0 && (
+                    <details>
+                      <summary style={{padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:600,color:"#334155",background:"#F1F5F9",borderRadius:6,display:"flex",alignItems:"center",gap:6,userSelect:"none"}}>
+                        <span>🗂 Depto</span>
+                        {addToListFilters.dept.length>0 && <span style={{background:"#3B82F6",color:"#fff",padding:"1px 6px",borderRadius:8,fontSize:9}}>{addToListFilters.dept.length}</span>}
+                        <span style={{marginLeft:"auto",fontSize:9,color:"#64748B"}}>{deptOptions.length}</span>
+                      </summary>
+                      <div style={{padding:"6px 0",display:"flex",flexWrap:"wrap",gap:3,maxHeight:100,overflowY:"auto"}}>
+                        {deptOptions.map(d=>{
+                          const active=addToListFilters.dept.includes(d);
+                          return(
+                            <span key={d} onClick={()=>toggleFilter("dept",d)} style={{fontSize:10,padding:"2px 8px",borderRadius:10,border:`1px solid ${active?"#3B82F6":"#CBD5E1"}`,background:active?"#EFF6FF":"#fff",color:active?"#1E40AF":"#475569",cursor:"pointer",fontWeight:active?600:500,whiteSpace:"nowrap"}}>{d}</span>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  )}
+                </div>
+                {totalFiltros>0 && (
+                  <div style={{marginTop:6,display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,color:"#64748B"}}>{totalFiltros} filtro{totalFiltros!==1?"s":""} activo{totalFiltros!==1?"s":""}</span>
+                    <button onClick={limpiarFiltros} style={{fontSize:10,padding:"2px 8px",border:"1px solid #FCA5A5",background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontWeight:600}}>Limpiar</button>
+                  </div>
+                )}
               </div>
-              <div style={{flex:1,overflowY:"auto",padding:"0 8px 8px"}}>
-                {!q && <div style={{padding:"20px 18px",textAlign:"center",fontSize:12,color:"#94A3B8"}}>Escribe para buscar…</div>}
-                {q && candidatos.length===0 && <div style={{padding:"20px 18px",textAlign:"center",fontSize:12,color:"#94A3B8"}}>Sin resultados o ya están en el chart</div>}
+
+              {/* Lista de candidatos */}
+              <div style={{flex:1,overflowY:"auto",padding:"6px 8px"}}>
+                {!hayFiltros && <div style={{padding:"20px 18px",textAlign:"center",fontSize:12,color:"#94A3B8"}}>Usa el buscador o filtros para encontrar personas</div>}
+                {hayFiltros && totalFiltrados===0 && <div style={{padding:"20px 18px",textAlign:"center",fontSize:12,color:"#94A3B8"}}>Sin resultados que no estén ya en el chart</div>}
+                {hayFiltros && totalFiltrados>30 && <div style={{padding:"6px 14px",fontSize:10,color:"#94A3B8",fontStyle:"italic"}}>Mostrando 30 de {totalFiltrados} · refina los filtros para ver más</div>}
                 {candidatos.map(r=>(
-                  <div key={r.id} onClick={()=>{addToList(r);setAddToListQ("");}} style={{padding:"8px 12px",cursor:"pointer",borderRadius:8,display:"flex",alignItems:"center",gap:10,margin:"2px 0"}} onMouseEnter={e=>e.currentTarget.style.background="#F1F5F9"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  <div key={r.id} onClick={()=>{addToList(r);}}
+                    style={{padding:"8px 12px",cursor:"pointer",borderRadius:8,display:"flex",alignItems:"center",gap:10,margin:"2px 0"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#F1F5F9"} onMouseLeave={e=>e.currentTarget.style.background=""}>
                     <div style={{width:32,height:32,borderRadius:"50%",background:"#EFF6FF",border:"1.5px solid #3B82F6",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                       <span style={{fontSize:10,fontWeight:700,color:"#1E40AF"}}>{ini(r.nombre)}</span>
                     </div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.nombre}</div>
-                      <div style={{fontSize:11,color:"#64748B"}}>{r.cargo||""}{r.area?" · "+r.area:""}</div>
+                      <div style={{fontSize:11,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.cargo||""}{r.area?" · "+r.area:""}{r.dept?" · "+r.dept:""}</div>
                     </div>
                     <span style={{fontSize:16,color:"#22C55E",fontWeight:700}}>＋</span>
                   </div>
                 ))}
               </div>
+
+              {/* Footer */}
               <div style={{padding:"10px 18px",borderTop:"1px solid #E2E8F0",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#F8FAFC"}}>
                 <span style={{fontSize:11,color:"#64748B"}}>Lista actual: {grupo.members.length} personas</span>
-                <button onClick={()=>setAddToListKey(null)} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#fff",cursor:"pointer",fontSize:12,fontWeight:600}}>Cerrar</button>
+                <button onClick={cerrarYAplicar} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#fff",cursor:"pointer",fontSize:12,fontWeight:600}}>
+                  {addToListExtraBosses.length>0 ? `✓ Aplicar y cerrar` : "Cerrar"}
+                </button>
               </div>
             </div>
           </div>
@@ -1041,6 +1215,7 @@ export default function App(){
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"#fff",borderBottom:"1px solid #E2E8F0",flexShrink:0,flexWrap:"wrap"}}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="8" y="2" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="2" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="14" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><path d="M12 9v3M6 15v-3h12v3" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
         <span style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Organigrama</span>
+        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v11.1</span>
         {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
         {!dirty && memFileName && <span style={{fontSize:11,color:"#15803D",fontWeight:600}} title={memFileName}>✓ guardado</span>}
         {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:"#F0FDF4",color:"#15803D",borderRadius:20,fontWeight:600}}>{roster.length} en roster</span>}
