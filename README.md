@@ -1,39 +1,37 @@
-# Organigramast v11.1 — Supertiendas Cañaveral
+# Organigramast v12 — Supertiendas Cañaveral
 
-## ⚠️ Problema de caché del navegador
+## Novedades
 
-Si al subir esta versión NO VES los filtros en el modal, es caché del navegador.
-Desde v11.1 verás una etiqueta "v11.1" gris al lado del título "Organigrama" arriba a la izquierda.
-**Si no la ves → estás viendo una versión vieja cacheada.**
+### 1. Editar nombre y color de los grupos (sedes 🏢)
 
-### Cómo forzar recarga
-- Chrome/Edge/Firefox: `Ctrl + Shift + R` (Windows/Linux) o `Cmd + Shift + R` (Mac)
-- O abre la página en incógnito: `Ctrl + Shift + N`
-- O borra el caché del sitio: F12 → pestaña Network → check "Disable cache"
+Selecciona un grupo → ✎ Editar. Ahora el panel del grupo muestra:
+- **Nombre** editable (antes era solo lectura)
+- **Color personalizado**:
+  - Color picker nativo del navegador (rueda completa)
+  - Input de hex manual (`#3B82F6`, etc.)
+  - 12 presets de un clic
+  - Botón "Por defecto" para volver al color automático
+- Vista previa en tiempo real del color que estás escogiendo
 
-También agregué meta-headers de no-cache al HTML para que no vuelva a pasar.
+El color se guarda en el nodo como `customColor` y persiste en el `.orgmem`.
 
-## Qué trae v11.1
+### 2. Selector de tipo de línea de conexión
 
-### Modal "➕ Agregar a lista" con filtros y jefes extra
+En la toolbar (al lado de los botones de exportar) aparece un selector con 3 opciones:
+- **╭╮ Curva** — el comportamiento de siempre (curvas suaves)
+- **┘└ Recta** — ángulos a 90° estilo organigrama clásico
+- **╲ Diagonal** — línea directa punto a punto
 
-**Abrir el modal**: clic en el botón ➕ verde del header de cualquier caja-lista.
+Es global para todo el chart. Cambia las líneas normales y también las de las cajas-lista.
 
-**Lo que deberías ver dentro del modal** (de arriba a abajo):
-1. 🟢 Header verde con los jefes actuales como chips
-2. 🔵 Sección colapsable "🔗 Agregar más jefes a esta lista" (fondo azul)
-3. 🔍 Input de búsqueda "Buscar persona por nombre, cargo, sede…"
-4. 🏙 Details "Sedes" (colapsable)
-5. 💼 Details "Cargos" (colapsable)
-6. 🗂 Details "Depto" (colapsable, si hay)
-7. 📋 Lista de resultados filtrados
-8. Footer con contador + botón Cerrar
+## Versión visible
 
-Los 3 details de filtros se expanden al darles clic en el header gris. Cada uno muestra chips clickeables multi-selección.
+Si al subir esta versión ves "v12" en gris al lado del título → cargó bien.
+Si ves "v11.1" o nada → es caché del navegador. Solución: `Ctrl+Shift+R` o ventana incógnita.
 
 ## Archivos
 
-- `index.html` — app compilada v11.1 con cache-busting
+- `index.html` — app compilada (cache-busting)
 - `App.jsx` — código fuente
 
 Sitio: https://felipeanali.github.io/organigramast/

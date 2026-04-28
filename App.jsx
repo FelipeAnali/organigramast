@@ -235,6 +235,8 @@ export default function App(){
   const [roster,  setRoster]  = useState([]);
   const [nodes,   setNodes]   = useState([]);
   const [panel,   setPanel]   = useState(null);
+  /* v12: tipo de línea de conexión global */
+  const [lineStyle, setLineStyle] = useState("curved"); // 'curved' | 'orthogonal' | 'straight'
   const [sel,     setSel]     = useState(null);
   const [addTab,  setAddTab]  = useState("persona"); // "persona"|"grupo"
 
@@ -283,12 +285,12 @@ export default function App(){
 
   /* ── v5: edición extendida (datos adicionales, además de jefe+foto) ── */
   const [editNombre, setEditNombre] = useState("");
+  /* v12: color personalizado para grupos */
+  const [editColor, setEditColor] = useState("");
   const [editCargo,  setEditCargo]  = useState("");
   const [editArea,   setEditArea]   = useState("");
   const [editDept,   setEditDept]   = useState("");
   const [editEmail,  setEditEmail]  = useState("");
-  const [editGrpNombre,   setEditGrpNombre]   = useState("");
-  const [editGrpColorIdx, setEditGrpColorIdx] = useState(0);
 
   /* ── v5: reimport con diff ── */
   const [impMode, setImpMode] = useState("initial"); // "initial" | "reimport"
@@ -334,7 +336,16 @@ export default function App(){
     return Object.fromEntries(areas.map((a,i)=>[a,i%PAL.length]));
   },[nodes]);
   const col =a=>PAL[areaIdx[a]??7];
-  const gcol=i=>GPAL[i%GPAL.length];
+  /* v12: gcol ahora puede recibir el nodo entero o el índice; si el nodo tiene customColor, lo usa */
+  const gcol=arg=>{
+    if(typeof arg==="object" && arg && arg.customColor){
+      const c=arg.customColor;
+      /* derivar bg/border/text desde el color custom */
+      return {bg:c+"22",border:c,text:"#fff"};
+    }
+    const i = typeof arg==="object" ? (arg?.colorIdx??0) : (arg??0);
+    return GPAL[i%GPAL.length];
+  };
 
   /* valores únicos para filtros y grupos desde maestro */
   const uniqueSedes=useMemo(()=>[...new Set(roster.map(r=>r.area).filter(Boolean))].sort(),[roster]);
@@ -560,17 +571,17 @@ export default function App(){
     setEditPIds(parentsOf(n));
     setEditFoto(n.foto||""); setBossQ("");
     setEditNombre(n.nombre||""); setEditCargo(n.cargo||""); setEditArea(n.area||""); setEditDept(n.dept||""); setEditEmail(n.email||"");
-    setEditGrpNombre(n.nombre||"");
-    setEditGrpColorIdx(n.colorIdx??0);
+    setEditColor(n.customColor||""); /* v12 */
     setPanel("edit");
   };
   const saveEdit=()=>{
     setNodes(p=>p.map(n=>{
       if(n.id!==editId) return n;
       const base=n.tipo==="grupo"
-        ? {...n,nombre:editGrpNombre.trim()||n.nombre,colorIdx:editGrpColorIdx}
+        ? {...n, nombre:editNombre||n.nombre, customColor:editColor||undefined}  /* v12: nombre editable + color custom */
         : {...n,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail};
-      /* aplicar parentIds/parentId según cantidad */
+      /* limpiar customColor si está vacío */
+      if(n.tipo==="grupo" && !editColor) delete base.customColor;
       delete base.parentId;
       delete base.parentIds;
       if(editPIds.length===0) base.parentId="";
@@ -578,7 +589,10 @@ export default function App(){
       else base.parentIds=[...editPIds];
       return base;
     }));
-    setRoster(r=>r.map(x=>x.id===editId?{...x,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,foto:editFoto}:x));
+    if(editId){
+      const isGrp = nodes.find(n=>n.id===editId)?.tipo==="grupo";
+      if(!isGrp) setRoster(r=>r.map(x=>x.id===editId?{...x,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,foto:editFoto}:x));
+    }
     setPanel(null); setSel(null); setEditId(null);
   };
   /* v8: delNode debe quitar el nodo de todas las listas de jefes de otros */
@@ -865,7 +879,32 @@ export default function App(){
   /* v8: edges ahora es multi — una arista por cada par (padre, hijo) */
   const edges=useMemo(()=>{
     const arr=[];
-    /* helper: ¿n es miembro de un auto-grupo? → devuelve {rep, rowIndex} o null */
+    /* v12: helper que genera path SVG según lineStyle */
+    const buildPath = (x1,y1,x2,y2)=>{
+      if(lineStyle==="straight"){
+        return `M${x1} ${y1}L${x2} ${y2}`;
+      }
+      if(lineStyle==="orthogonal"){
+        const my=(y1+y2)/2;
+        return `M${x1} ${y1}L${x1} ${my}L${x2} ${my}L${x2} ${y2}`;
+      }
+      /* curved (default) */
+      const my=(y1+y2)/2;
+      return `M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`;
+    };
+    /* path para conexión a fila de caja-lista (sale del padre, llega al borde izquierdo de la fila) */
+    const buildRowPath = (x1,y1,x2,y2)=>{
+      if(lineStyle==="straight"){
+        return `M${x1} ${y1}L${x2} ${y2}`;
+      }
+      if(lineStyle==="orthogonal"){
+        const mx=x2-20;
+        return `M${x1} ${y1}L${x1} ${y2}L${x2} ${y2}`;
+      }
+      /* curved */
+      return `M${x1} ${y1}C${x1} ${(y1+y2)/2} ${x2-30} ${y2} ${x2} ${y2}`;
+    };
+
     const memberInfo=(id)=>{
       for(const [key,g] of Object.entries(autoGroups)){
         const idx=g.members.indexOf(id);
@@ -876,7 +915,6 @@ export default function App(){
     nodes.forEach(n=>{
       const info=memberInfo(n.id);
       const parents=parentsOf(n);
-      /* Si n es miembro de un auto-grupo: dibujar línea a la fila específica dentro de la caja del representante */
       if(info){
         const repPos=pos[info.rep];
         if(!repPos) return;
@@ -885,39 +923,36 @@ export default function App(){
           const p=pos[pid];
           const ph=p.h||NH, pw=p.w||NW;
           const x1=p.x+pw/2, y1=p.y+ph;
-          /* y2 = altura de la fila específica dentro de la caja */
           const rowY = repPos.y + LIST_HEAD + info.rowIndex*LIST_ROW + LIST_ROW/2;
-          const x2 = repPos.x; // borde izquierdo de la caja
+          const x2 = repPos.x;
           const y2 = rowY;
           const active = sel===n.id || sel===pid;
           arr.push({
             key:`${pid}->${n.id}-row`,
-            /* curva suave hacia el borde izquierdo de la fila */
-            d:`M${x1} ${y1}C${x1} ${(y1+y2)/2} ${x2-30} ${y2} ${x2} ${y2}`,
+            d: buildRowPath(x1,y1,x2,y2),
             active,
-            thin:true, // línea más fina para las filas
+            thin:true,
           });
         });
         return;
       }
-      /* Render normal: línea del padre al centro-top del nodo */
       if(!pos[n.id]) return;
       parents.forEach(pid=>{
         if(!pos[pid]) return;
         const p=pos[pid], c=pos[n.id];
         const ph=p.h||NH, pw=p.w||NW, cw=c.w||NW;
-        const x1=p.x+pw/2, y1=p.y+ph, x2=c.x+cw/2, y2=c.y, my=(y1+y2)/2;
+        const x1=p.x+pw/2, y1=p.y+ph, x2=c.x+cw/2, y2=c.y;
         const active=sel===n.id||sel===pid;
         arr.push({
           key:`${pid}->${n.id}`,
-          d:`M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`,
+          d: buildPath(x1,y1,x2,y2),
           active,
           multi: parents.length>1,
         });
       });
     });
     return arr;
-  },[nodes,pos,sel,autoGroups]);
+  },[nodes,pos,sel,autoGroups,lineStyle]);
 
   const selNode=nodes.find(n=>n.id===sel);
   const editNode=nodes.find(n=>n.id===editId);
@@ -1219,7 +1254,7 @@ export default function App(){
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"#fff",borderBottom:"1px solid #E2E8F0",flexShrink:0,flexWrap:"wrap"}}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="8" y="2" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="2" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="14" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><path d="M12 9v3M6 15v-3h12v3" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
         <span style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Organigrama</span>
-        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v11.1</span>
+        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12</span>
         {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
         {!dirty && memFileName && <span style={{fontSize:11,color:"#15803D",fontWeight:600}} title={memFileName}>✓ guardado</span>}
         {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:"#F0FDF4",color:"#15803D",borderRadius:20,fontWeight:600}}>{roster.length} en roster</span>}
@@ -1233,6 +1268,24 @@ export default function App(){
         <input ref={memRef} type="file" accept=".orgmem,.json" style={{display:"none"}} onChange={loadMem}/>
         <button className="btn g" onClick={saveMem} disabled={roster.length===0&&nodes.length===0} title="Descargar todo el trabajo como archivo portable">💾 Guardar memoria</button>
         {nodes.length>0&&<><button className="btn" onClick={exportJSON}>Exportar JSON</button><button className="btn o" onClick={exportPDF} disabled={pdfLoading}>{pdfLoading?"Generando…":"Descargar PDF"}</button></>}
+        {/* v12: selector de tipo de línea */}
+        {nodes.length>0 && (
+          <div title="Tipo de línea de conexión" style={{display:"flex",alignItems:"center",gap:4,padding:"3px 4px",background:"#F1F5F9",borderRadius:8,border:"1px solid #E2E8F0"}}>
+            <span style={{fontSize:10,color:"#64748B",padding:"0 4px",fontWeight:600}}>Líneas:</span>
+            <button onClick={()=>setLineStyle("curved")} title="Curva suave"
+              style={{padding:"3px 7px",fontSize:11,borderRadius:6,border:"none",cursor:"pointer",background:lineStyle==="curved"?"#3B82F6":"transparent",color:lineStyle==="curved"?"#fff":"#64748B",fontWeight:600}}>
+              ╭╮ Curva
+            </button>
+            <button onClick={()=>setLineStyle("orthogonal")} title="Líneas con ángulos rectos (organigrama clásico)"
+              style={{padding:"3px 7px",fontSize:11,borderRadius:6,border:"none",cursor:"pointer",background:lineStyle==="orthogonal"?"#3B82F6":"transparent",color:lineStyle==="orthogonal"?"#fff":"#64748B",fontWeight:600}}>
+              ┘└ Recta
+            </button>
+            <button onClick={()=>setLineStyle("straight")} title="Línea diagonal directa"
+              style={{padding:"3px 7px",fontSize:11,borderRadius:6,border:"none",cursor:"pointer",background:lineStyle==="straight"?"#3B82F6":"transparent",color:lineStyle==="straight"?"#fff":"#64748B",fontWeight:600}}>
+              ╲ Diagonal
+            </button>
+          </div>
+        )}
         {(nodes.length>0||roster.length>0)&&<button className="btn d" onClick={()=>{if(dirty&&!confirm("⚠ Tienes cambios sin guardar. ¿Limpiar de todos modos?"))return;setNodes([]);setRoster([]);setSel(null);setDirty(false);setMemFileName("");}}>Limpiar</button>}
       </div>
 
@@ -1526,7 +1579,7 @@ export default function App(){
                   <div style={{marginTop:16}}>
                     <div style={{fontSize:11,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>Grupos en el chart</div>
                     {nodes.filter(n=>n.tipo==="grupo").map(n=>{
-                      const g=gcol(n.colorIdx??0);
+                      const g=gcol(n);
                       return(
                         <div key={n.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #F1F5F9"}}>
                           <div style={{width:24,height:24,borderRadius:6,background:g.bg,flexShrink:0}}/>
@@ -1593,42 +1646,39 @@ export default function App(){
             )}
 
             {editNode.tipo==="grupo"&&(()=>{
-              const g=gcol(editGrpColorIdx);
+              const g=gcol(editColor?{customColor:editColor}:editNode);
+              const presets=["#3B82F6","#22C55E","#A855F7","#F97316","#EF4444","#14B8A6","#EAB308","#EC4899","#0EA5E9","#84CC16","#8B5CF6","#F59E0B"];
               return(
-                <div style={{marginBottom:16}}>
-                  {/* Preview del color actual */}
-                  <div style={{textAlign:"center",marginBottom:12}}>
-                    <div style={{width:54,height:54,borderRadius:12,margin:"0 auto 6px",background:g.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <>
+                  <div style={{textAlign:"center",marginBottom:14}}>
+                    <div style={{width:54,height:54,borderRadius:12,margin:"0 auto 6px",background:g.bg,border:`2px solid ${g.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
                       <span style={{fontSize:22}}>🏢</span>
                     </div>
+                    <div style={{fontSize:11,color:"#94A3B8"}}>Vista previa</div>
                   </div>
-                  {/* Nombre del grupo */}
-                  <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:4}}>Nombre del grupo</label>
-                  <input
-                    className="inp"
-                    style={{fontSize:13,padding:"7px 10px",marginBottom:12}}
-                    value={editGrpNombre}
-                    onChange={e=>setEditGrpNombre(e.target.value)}
-                    placeholder="Nombre del grupo…"
-                  />
-                  {/* Selector de color */}
-                  <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>Color del grupo</label>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:4}}>
-                    {GPAL.map((gc,i)=>(
-                      <div
-                        key={i}
-                        onClick={()=>setEditGrpColorIdx(i)}
-                        title={`Color ${i+1}`}
-                        style={{
-                          width:30,height:30,borderRadius:8,background:gc.bg,cursor:"pointer",
-                          border:editGrpColorIdx===i?"3px solid #0F172A":"3px solid transparent",
-                          boxShadow:editGrpColorIdx===i?"0 0 0 2px #94A3B8":"none",
-                          transition:"border .12s,box-shadow .12s"
-                        }}
-                      />
-                    ))}
+
+                  {/* v12: Nombre editable */}
+                  <div style={{marginBottom:14}}>
+                    <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>Nombre del grupo / sede</label>
+                    <input className="inp" value={editNombre} onChange={e=>setEditNombre(e.target.value)} placeholder="Ej: SC PALMITEX"/>
                   </div>
-                </div>
+
+                  {/* v12: Color personalizado */}
+                  <div style={{marginBottom:16}}>
+                    <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>Color</label>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <input type="color" value={editColor||"#3B82F6"} onChange={e=>setEditColor(e.target.value)} style={{width:46,height:34,border:"1px solid #CBD5E1",borderRadius:6,cursor:"pointer",padding:2,background:"#fff"}}/>
+                      <input className="inp" value={editColor} onChange={e=>setEditColor(e.target.value)} placeholder="#3B82F6 (hex)" style={{flex:1,fontFamily:"monospace",fontSize:12}}/>
+                      {editColor && <button onClick={()=>setEditColor("")} style={{padding:"5px 10px",border:"1px solid #CBD5E1",background:"#fff",borderRadius:6,cursor:"pointer",fontSize:11}}>Por defecto</button>}
+                    </div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {presets.map(c=>(
+                        <button key={c} onClick={()=>setEditColor(c)} title={c}
+                          style={{width:24,height:24,borderRadius:6,background:c,border:editColor===c?"2px solid #0F172A":"1px solid #E2E8F0",cursor:"pointer",padding:0}}/>
+                      ))}
+                    </div>
+                  </div>
+                </>
               );
             })()}
 
@@ -1826,7 +1876,7 @@ export default function App(){
                 }
 
                 if(n.tipo==="grupo"){
-                  const g=gcol(n.colorIdx??0);
+                  const g=gcol(n);
                   const esJefeActDelOrigen_g = modoAsignar_g && (()=>{
                     const origen=nodes.find(x=>x.id===assignBossFor);
                     return origen && parentsOf(origen).includes(n.id);
