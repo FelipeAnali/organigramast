@@ -287,6 +287,8 @@ export default function App(){
   const [editArea,   setEditArea]   = useState("");
   const [editDept,   setEditDept]   = useState("");
   const [editEmail,  setEditEmail]  = useState("");
+  const [editGrpNombre,   setEditGrpNombre]   = useState("");
+  const [editGrpColorIdx, setEditGrpColorIdx] = useState(0);
 
   /* ── v5: reimport con diff ── */
   const [impMode, setImpMode] = useState("initial"); // "initial" | "reimport"
@@ -558,13 +560,15 @@ export default function App(){
     setEditPIds(parentsOf(n));
     setEditFoto(n.foto||""); setBossQ("");
     setEditNombre(n.nombre||""); setEditCargo(n.cargo||""); setEditArea(n.area||""); setEditDept(n.dept||""); setEditEmail(n.email||"");
+    setEditGrpNombre(n.nombre||"");
+    setEditGrpColorIdx(n.colorIdx??0);
     setPanel("edit");
   };
   const saveEdit=()=>{
     setNodes(p=>p.map(n=>{
       if(n.id!==editId) return n;
       const base=n.tipo==="grupo"
-        ? {...n}
+        ? {...n,nombre:editGrpNombre.trim()||n.nombre,colorIdx:editGrpColorIdx}
         : {...n,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail};
       /* aplicar parentIds/parentId según cantidad */
       delete base.parentId;
@@ -1589,13 +1593,41 @@ export default function App(){
             )}
 
             {editNode.tipo==="grupo"&&(()=>{
-              const g=gcol(editNode.colorIdx??0);
+              const g=gcol(editGrpColorIdx);
               return(
-                <div style={{textAlign:"center",marginBottom:16}}>
-                  <div style={{width:54,height:54,borderRadius:12,margin:"0 auto 6px",background:g.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <span style={{fontSize:22}}>🏢</span>
+                <div style={{marginBottom:16}}>
+                  {/* Preview del color actual */}
+                  <div style={{textAlign:"center",marginBottom:12}}>
+                    <div style={{width:54,height:54,borderRadius:12,margin:"0 auto 6px",background:g.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <span style={{fontSize:22}}>🏢</span>
+                    </div>
                   </div>
-                  <div style={{fontSize:13,fontWeight:700,color:"#0F172A"}}>{editNode.nombre}</div>
+                  {/* Nombre del grupo */}
+                  <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:4}}>Nombre del grupo</label>
+                  <input
+                    className="inp"
+                    style={{fontSize:13,padding:"7px 10px",marginBottom:12}}
+                    value={editGrpNombre}
+                    onChange={e=>setEditGrpNombre(e.target.value)}
+                    placeholder="Nombre del grupo…"
+                  />
+                  {/* Selector de color */}
+                  <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>Color del grupo</label>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:4}}>
+                    {GPAL.map((gc,i)=>(
+                      <div
+                        key={i}
+                        onClick={()=>setEditGrpColorIdx(i)}
+                        title={`Color ${i+1}`}
+                        style={{
+                          width:30,height:30,borderRadius:8,background:gc.bg,cursor:"pointer",
+                          border:editGrpColorIdx===i?"3px solid #0F172A":"3px solid transparent",
+                          boxShadow:editGrpColorIdx===i?"0 0 0 2px #94A3B8":"none",
+                          transition:"border .12s,box-shadow .12s"
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
               );
             })()}
