@@ -13,15 +13,16 @@ const PAL = [
   { bg:"#F1F5F9", border:"#64748B", text:"#334155", dot:"#64748B" },
 ];
 /* Paletas para grupos (más sólidas) */
+/* v13: paleta corporativa Cañaveral (verde institucional + matices) */
 const GPAL = [
-  { bg:"#1E40AF", border:"#1E3A8A", text:"#ffffff" },
-  { bg:"#15803D", border:"#14532D", text:"#ffffff" },
-  { bg:"#7E22CE", border:"#581C87", text:"#ffffff" },
-  { bg:"#C2410C", border:"#9A3412", text:"#ffffff" },
-  { bg:"#BE123C", border:"#9F1239", text:"#ffffff" },
-  { bg:"#0F766E", border:"#134E4A", text:"#ffffff" },
-  { bg:"#854D0E", border:"#713F12", text:"#ffffff" },
-  { bg:"#334155", border:"#1E293B", text:"#ffffff" },
+  { bg:"#0B2310", border:"#082009", text:"#ffffff" }, /* verde muy oscuro principal */
+  { bg:"#184C23", border:"#113519", text:"#ffffff" }, /* verde oscuro */
+  { bg:"#15803D", border:"#14532D", text:"#ffffff" }, /* verde medio */
+  { bg:"#1A6B30", border:"#113519", text:"#ffffff" }, /* verde corporativo */
+  { bg:"#22663B", border:"#0B2310", text:"#ffffff" }, /* verde alterno */
+  { bg:"#2D5A2D", border:"#1B3D1B", text:"#ffffff" },
+  { bg:"#1F6A3E", border:"#0F4527", text:"#ffffff" },
+  { bg:"#3F7A4D", border:"#27513A", text:"#ffffff" },
 ];
 
 const NW=180, NH=200, NHG=64, GX=22, GY=40;
@@ -112,6 +113,25 @@ function detectarFormatoApellidosPrimero(roster){
   return ratioFinal>=0.55 && ratioFinal > ratioInicio + 0.15;
 }
 
+/* v13: detectar nivel jerárquico de admin a partir del cargo (con override manual via n.adminLevel)
+   Devuelve 1=master, 2=senior, 3=junior, 99=otro/no-admin */
+function adminLevelOf(n){
+  if(!n) return 99;
+  if(n.adminLevel) {
+    /* Override manual: "master" | "senior" | "junior" | "" */
+    const lvl = String(n.adminLevel).toLowerCase();
+    if(lvl==="master") return 1;
+    if(lvl==="senior") return 2;
+    if(lvl==="junior") return 3;
+  }
+  const cargo = (n.cargo||"").toUpperCase();
+  if(!cargo.includes("ADMIN")) return 99;
+  if(cargo.includes("MASTER") || cargo.includes("MÁSTER")) return 1;
+  if(cargo.includes("SENIOR") || cargo.includes("SÉNIOR")) return 2;
+  if(cargo.includes("JUNIOR") || cargo.includes("JÚNIOR")) return 3;
+  return 99;
+}
+
 function buildLayout(nodes, compactSet, autoGroups){
   compactSet = compactSet || new Set();
   autoGroups = autoGroups || {};
@@ -144,6 +164,23 @@ function buildLayout(nodes, compactSet, autoGroups){
     const pp=primaryParentOf(n);
     if(pp && byId[pp]) ch[pp].push(n.id);
     else roots.push(n.id);
+  });
+
+  /* v13: ordenar hijos por nivel jerárquico (master 1 → senior 2 → junior 3 → resto 99).
+     Aplica cuando los hijos son admins (tienen cargo con ADMIN) o tienen adminLevel manual.
+     Si todos son nivel 99 (no admins), conserva el orden original. */
+  Object.keys(ch).forEach(parentId=>{
+    const kids = ch[parentId];
+    if(kids.length<2) return;
+    const conNivel = kids.map(id=>({id, lvl: adminLevelOf(byId[id])}));
+    /* Solo reordenar si HAY al menos un admin entre los hijos */
+    if(!conNivel.some(x=>x.lvl<99)) return;
+    /* sort estable: primero por nivel, luego mantiene orden previo */
+    conNivel.sort((a,b)=>{
+      if(a.lvl!==b.lvl) return a.lvl-b.lvl;
+      return kids.indexOf(a.id) - kids.indexOf(b.id);
+    });
+    ch[parentId] = conNivel.map(x=>x.id);
   });
 
   /* ¿este nodo está bajo un ancestro compactado? */
@@ -244,6 +281,24 @@ function buildLayout(nodes, compactSet, autoGroups){
 
 const ini=n=>(n||"").split(" ").map(w=>w[0]).filter(Boolean).slice(0,2).join("").toUpperCase()||"?";
 const trunc=(s="",mx=22)=>s.length>mx?s.slice(0,mx-1)+"…":s;
+
+/* v13: ícono de caña de azúcar (corporativo Cañaveral) */
+const CanaIcon = ({size=16, color="#ffffff"})=>(
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
+    {/* Tallo principal con segmentos */}
+    <path d="M12 22 L12 4" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+    <path d="M9.8 7.5 L14.2 7.5" stroke={color} strokeWidth="1.4" strokeLinecap="round"/>
+    <path d="M9.8 11 L14.2 11" stroke={color} strokeWidth="1.4" strokeLinecap="round"/>
+    <path d="M9.8 14.5 L14.2 14.5" stroke={color} strokeWidth="1.4" strokeLinecap="round"/>
+    <path d="M9.8 18 L14.2 18" stroke={color} strokeWidth="1.4" strokeLinecap="round"/>
+    {/* Hojas izquierda */}
+    <path d="M12 5 Q7 3 4 6 Q7 5 10 7" stroke={color} strokeWidth="1.4" strokeLinecap="round" fill="none"/>
+    <path d="M12 9 Q8 8 5.5 10.5 Q8 10 10.5 11" stroke={color} strokeWidth="1.2" strokeLinecap="round" fill="none"/>
+    {/* Hojas derecha */}
+    <path d="M12 5 Q17 3 20 6 Q17 5 14 7" stroke={color} strokeWidth="1.4" strokeLinecap="round" fill="none"/>
+    <path d="M12 9 Q16 8 18.5 10.5 Q16 10 13.5 11" stroke={color} strokeWidth="1.2" strokeLinecap="round" fill="none"/>
+  </svg>
+);
 const hasVal=v=>{ if(v===null||v===undefined)return false; const s=String(v).trim(); return s!==""&&s.toLowerCase()!=="nat"&&s!=="undefined"&&s!=="null"; };
 
 const VCOLS={
@@ -355,6 +410,8 @@ export default function App(){
   const [editArea,   setEditArea]   = useState("");
   const [editDept,   setEditDept]   = useState("");
   const [editEmail,  setEditEmail]  = useState("");
+  /* v13: nivel admin (override manual) */
+  const [editAdminLevel, setEditAdminLevel] = useState("");
 
   /* ── v5: reimport con diff ── */
   const [impMode, setImpMode] = useState("initial"); // "initial" | "reimport"
@@ -691,6 +748,7 @@ export default function App(){
     setEditPIds(parentsOf(n));
     setEditFoto(n.foto||""); setBossQ("");
     setEditNombre(n.nombre||""); setEditCargo(n.cargo||""); setEditArea(n.area||""); setEditDept(n.dept||""); setEditEmail(n.email||"");
+    setEditAdminLevel(n.adminLevel||""); /* v13 */
     setEditColor(n.customColor||""); /* v12 */
     setPanel("edit");
   };
@@ -698,10 +756,10 @@ export default function App(){
     setNodes(p=>p.map(n=>{
       if(n.id!==editId) return n;
       const base=n.tipo==="grupo"
-        ? {...n, nombre:editNombre||n.nombre, customColor:editColor||undefined}  /* v12: nombre editable + color custom */
-        : {...n,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail};
-      /* limpiar customColor si está vacío */
+        ? {...n, nombre:editNombre||n.nombre, customColor:editColor||undefined}
+        : {...n,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,adminLevel:editAdminLevel||undefined};
       if(n.tipo==="grupo" && !editColor) delete base.customColor;
+      if(n.tipo==="persona" && !editAdminLevel) delete base.adminLevel; /* v13 */
       delete base.parentId;
       delete base.parentIds;
       if(editPIds.length===0) base.parentId="";
@@ -711,7 +769,7 @@ export default function App(){
     }));
     if(editId){
       const isGrp = nodes.find(n=>n.id===editId)?.tipo==="grupo";
-      if(!isGrp) setRoster(r=>r.map(x=>x.id===editId?{...x,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,foto:editFoto}:x));
+      if(!isGrp) setRoster(r=>r.map(x=>x.id===editId?{...x,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,foto:editFoto,adminLevel:editAdminLevel||undefined}:x));
     }
     setPanel(null); setSel(null); setEditId(null);
   };
@@ -1435,7 +1493,7 @@ export default function App(){
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"#fff",borderBottom:"1px solid #E2E8F0",flexShrink:0,flexWrap:"wrap"}}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="8" y="2" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="2" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="14" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><path d="M12 9v3M6 15v-3h12v3" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
         <span style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Organigrama</span>
-        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12.5</span>
+        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v13</span>
         {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
         {!dirty && memFileName && <span style={{fontSize:11,color:"#15803D",fontWeight:600}} title={memFileName}>✓ guardado</span>}
         {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:"#F0FDF4",color:"#15803D",borderRadius:20,fontWeight:600}}>{roster.length} en roster</span>}
@@ -1850,6 +1908,29 @@ export default function App(){
                   <label style={{display:"block",fontSize:11,color:"#64748B",marginBottom:2}}>Email</label>
                   <input className="inp" style={{fontSize:12,padding:"6px 10px"}} value={editEmail} onChange={e=>setEditEmail(e.target.value)}/>
                 </div>
+                {/* v13: Override de nivel jerárquico */}
+                <div style={{marginTop:8}}>
+                  <label style={{display:"block",fontSize:11,color:"#64748B",marginBottom:2}}>Nivel jerárquico (orden en la fila)</label>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {[
+                      {v:"",l:"Auto (detectar)",bg:"#F1F5F9",bd:"#CBD5E1",fg:"#475569"},
+                      {v:"master",l:"1️⃣ Master",bg:"#DBEAFE",bd:"#3B82F6",fg:"#1E40AF"},
+                      {v:"senior",l:"2️⃣ Senior",bg:"#DCFCE7",bd:"#22C55E",fg:"#15803D"},
+                      {v:"junior",l:"3️⃣ Junior",bg:"#FEF3C7",bd:"#F59E0B",fg:"#92400E"},
+                    ].map(opt=>{
+                      const active = (editAdminLevel||"")===opt.v;
+                      return(
+                        <button key={opt.v||"auto"} onClick={()=>setEditAdminLevel(opt.v)}
+                          style={{padding:"4px 9px",borderRadius:6,border:active?`1.5px solid ${opt.bd}`:"1px solid #E2E8F0",background:active?opt.bg:"#fff",color:active?opt.fg:"#64748B",cursor:"pointer",fontSize:11,fontWeight:active?700:500}}>
+                          {opt.l}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{fontSize:10,color:"#94A3B8",marginTop:4,lineHeight:1.4}}>
+                    💡 Auto = detecta del cargo. Override manual si el cargo no incluye master/senior/junior pero quieres ordenar igual.
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1860,7 +1941,7 @@ export default function App(){
                 <>
                   <div style={{textAlign:"center",marginBottom:14}}>
                     <div style={{width:54,height:54,borderRadius:12,margin:"0 auto 6px",background:g.bg,border:`2px solid ${g.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                      <span style={{fontSize:22}}>🏢</span>
+                      <CanaIcon size={28} color={g.text}/>
                     </div>
                     <div style={{fontSize:11,color:"#94A3B8"}}>Vista previa</div>
                   </div>
@@ -2167,7 +2248,7 @@ export default function App(){
                         cursor:modoAsignar_g?"crosshair":"pointer",
                         position:"relative",
                       }}>
-                        <span style={{fontSize:16,flexShrink:0}}>🏢</span>
+                        <CanaIcon size={18} color={esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text)}/>
                         <span style={{fontSize:13,fontWeight:700,color:esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text),lineHeight:1.15,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",wordBreak:"break-word",textAlign:"left"}}>{n.nombre}</span>
                         {esJefeActDelOrigen_g && <span style={{position:"absolute",top:-8,right:-8,width:22,height:22,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,boxShadow:"0 2px 6px rgba(0,0,0,.3)",border:"2px solid #fff"}}>✓</span>}
                         {isSel&&!modoAsignar_g&&(
@@ -2305,6 +2386,20 @@ export default function App(){
                           HIJOS EN LISTA
                         </div>
                       )}
+
+                      {/* v13: badge de nivel jerárquico admin */}
+                      {(()=>{
+                        const lvl = adminLevelOf(n);
+                        if(lvl===99) return null;
+                        const cfg = lvl===1 ? {n:"M",t:"Master",bg:"#1E40AF",fg:"#fff"}
+                                  : lvl===2 ? {n:"S",t:"Senior",bg:"#15803D",fg:"#fff"}
+                                  : {n:"J",t:"Junior",bg:"#D97706",fg:"#fff"};
+                        return(
+                          <div title={`Admin ${cfg.t}`} style={{position:"absolute",top:10,left:10,width:18,height:18,borderRadius:"50%",background:cfg.bg,color:cfg.fg,fontSize:10,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,boxShadow:"0 1px 3px rgba(0,0,0,.15)"}}>
+                            {cfg.n}
+                          </div>
+                        );
+                      })()}
 
                       {/* Botones (edit + v7: compactar + asignar jefe) */}
                       {isSel && !modoAsignar && (

@@ -6,12 +6,12 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
     <meta http-equiv="Pragma" content="no-cache"/>
     <meta http-equiv="Expires" content="0"/>
-    <meta name="version" content="v12.5-7e2d9cb7"/>
-    <title>Organigrama Cañaveral v12.5</title>
+    <meta name="version" content="v13-2e04c727"/>
+    <title>Organigrama Cañaveral v13</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
       #root { height: 100%; }
-      #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #64748B; font-size: 14px; }
+      #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #0B2310; font-size: 14px; }
       details > summary { list-style: none; }
       details > summary::-webkit-details-marker { display: none; }
     </style>
@@ -20,8 +20,8 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   </head>
   <body>
-    <div id="root"><div id="loading">Cargando organigrama v12.5…</div></div>
-    <!-- build: 7e2d9cb7 / ts: 1777408510 -->
+    <div id="root"><div id="loading">Cargando organigrama v13…</div></div>
+    <!-- build: 2e04c727 / ts: 1777410067 -->
     <script>
       const { useState, useMemo, useRef, useCallback, useEffect } = React;
 const PAL = [
@@ -35,14 +35,19 @@ const PAL = [
   { bg: "#F1F5F9", border: "#64748B", text: "#334155", dot: "#64748B" }
 ];
 const GPAL = [
-  { bg: "#1E40AF", border: "#1E3A8A", text: "#ffffff" },
+  { bg: "#0B2310", border: "#082009", text: "#ffffff" },
+  /* verde muy oscuro principal */
+  { bg: "#184C23", border: "#113519", text: "#ffffff" },
+  /* verde oscuro */
   { bg: "#15803D", border: "#14532D", text: "#ffffff" },
-  { bg: "#7E22CE", border: "#581C87", text: "#ffffff" },
-  { bg: "#C2410C", border: "#9A3412", text: "#ffffff" },
-  { bg: "#BE123C", border: "#9F1239", text: "#ffffff" },
-  { bg: "#0F766E", border: "#134E4A", text: "#ffffff" },
-  { bg: "#854D0E", border: "#713F12", text: "#ffffff" },
-  { bg: "#334155", border: "#1E293B", text: "#ffffff" }
+  /* verde medio */
+  { bg: "#1A6B30", border: "#113519", text: "#ffffff" },
+  /* verde corporativo */
+  { bg: "#22663B", border: "#0B2310", text: "#ffffff" },
+  /* verde alterno */
+  { bg: "#2D5A2D", border: "#1B3D1B", text: "#ffffff" },
+  { bg: "#1F6A3E", border: "#0F4527", text: "#ffffff" },
+  { bg: "#3F7A4D", border: "#27513A", text: "#ffffff" }
 ];
 const NW = 180, NH = 200, NHG = 64, GX = 22, GY = 40;
 const FOTO_SZ = 84;
@@ -211,6 +216,21 @@ function detectarFormatoApellidosPrimero(roster) {
   const ratioInicio = coincidenciasInicio / total;
   return ratioFinal >= 0.55 && ratioFinal > ratioInicio + 0.15;
 }
+function adminLevelOf(n) {
+  if (!n) return 99;
+  if (n.adminLevel) {
+    const lvl = String(n.adminLevel).toLowerCase();
+    if (lvl === "master") return 1;
+    if (lvl === "senior") return 2;
+    if (lvl === "junior") return 3;
+  }
+  const cargo = (n.cargo || "").toUpperCase();
+  if (!cargo.includes("ADMIN")) return 99;
+  if (cargo.includes("MASTER") || cargo.includes("M\xC1STER")) return 1;
+  if (cargo.includes("SENIOR") || cargo.includes("S\xC9NIOR")) return 2;
+  if (cargo.includes("JUNIOR") || cargo.includes("J\xDANIOR")) return 3;
+  return 99;
+}
 function buildLayout(nodes, compactSet, autoGroups) {
   compactSet = compactSet || /* @__PURE__ */ new Set();
   autoGroups = autoGroups || {};
@@ -241,6 +261,17 @@ function buildLayout(nodes, compactSet, autoGroups) {
     const pp = primaryParentOf(n);
     if (pp && byId[pp]) ch[pp].push(n.id);
     else roots.push(n.id);
+  });
+  Object.keys(ch).forEach((parentId) => {
+    const kids = ch[parentId];
+    if (kids.length < 2) return;
+    const conNivel = kids.map((id) => ({ id, lvl: adminLevelOf(byId[id]) }));
+    if (!conNivel.some((x) => x.lvl < 99)) return;
+    conNivel.sort((a, b) => {
+      if (a.lvl !== b.lvl) return a.lvl - b.lvl;
+      return kids.indexOf(a.id) - kids.indexOf(b.id);
+    });
+    ch[parentId] = conNivel.map((x) => x.id);
   });
   const compactAncestor = {};
   const findCompactAnc = (id) => {
@@ -342,6 +373,7 @@ function buildLayout(nodes, compactSet, autoGroups) {
 }
 const ini = (n) => (n || "").split(" ").map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
 const trunc = (s = "", mx = 22) => s.length > mx ? s.slice(0, mx - 1) + "\u2026" : s;
+const CanaIcon = ({ size = 16, color = "#ffffff" }) => /* @__PURE__ */ React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", xmlns: "http://www.w3.org/2000/svg", style: { flexShrink: 0 } }, /* @__PURE__ */ React.createElement("path", { d: "M12 22 L12 4", stroke: color, strokeWidth: "1.8", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M9.8 7.5 L14.2 7.5", stroke: color, strokeWidth: "1.4", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M9.8 11 L14.2 11", stroke: color, strokeWidth: "1.4", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M9.8 14.5 L14.2 14.5", stroke: color, strokeWidth: "1.4", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M9.8 18 L14.2 18", stroke: color, strokeWidth: "1.4", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M12 5 Q7 3 4 6 Q7 5 10 7", stroke: color, strokeWidth: "1.4", strokeLinecap: "round", fill: "none" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9 Q8 8 5.5 10.5 Q8 10 10.5 11", stroke: color, strokeWidth: "1.2", strokeLinecap: "round", fill: "none" }), /* @__PURE__ */ React.createElement("path", { d: "M12 5 Q17 3 20 6 Q17 5 14 7", stroke: color, strokeWidth: "1.4", strokeLinecap: "round", fill: "none" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9 Q16 8 18.5 10.5 Q16 10 13.5 11", stroke: color, strokeWidth: "1.2", strokeLinecap: "round", fill: "none" }));
 const hasVal = (v) => {
   if (v === null || v === void 0) return false;
   const s = String(v).trim();
@@ -432,6 +464,7 @@ function App() {
   const [editArea, setEditArea] = useState("");
   const [editDept, setEditDept] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [editAdminLevel, setEditAdminLevel] = useState("");
   const [impMode, setImpMode] = useState("initial");
   const [conflicts, setConflicts] = useState([]);
   useEffect(() => {
@@ -790,14 +823,16 @@ function App() {
     setEditArea(n.area || "");
     setEditDept(n.dept || "");
     setEditEmail(n.email || "");
+    setEditAdminLevel(n.adminLevel || "");
     setEditColor(n.customColor || "");
     setPanel("edit");
   };
   const saveEdit = () => {
     setNodes((p) => p.map((n) => {
       if (n.id !== editId) return n;
-      const base = n.tipo === "grupo" ? { ...n, nombre: editNombre || n.nombre, customColor: editColor || void 0 } : { ...n, foto: editFoto, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail };
+      const base = n.tipo === "grupo" ? { ...n, nombre: editNombre || n.nombre, customColor: editColor || void 0 } : { ...n, foto: editFoto, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail, adminLevel: editAdminLevel || void 0 };
       if (n.tipo === "grupo" && !editColor) delete base.customColor;
+      if (n.tipo === "persona" && !editAdminLevel) delete base.adminLevel;
       delete base.parentId;
       delete base.parentIds;
       if (editPIds.length === 0) base.parentId = "";
@@ -807,7 +842,7 @@ function App() {
     }));
     if (editId) {
       const isGrp = nodes.find((n) => n.id === editId)?.tipo === "grupo";
-      if (!isGrp) setRoster((r) => r.map((x) => x.id === editId ? { ...x, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail, foto: editFoto } : x));
+      if (!isGrp) setRoster((r) => r.map((x) => x.id === editId ? { ...x, nombre: editNombre, cargo: editCargo, area: editArea, dept: editDept, email: editEmail, foto: editFoto, adminLevel: editAdminLevel || void 0 } : x));
     }
     setPanel(null);
     setSel(null);
@@ -1308,7 +1343,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
       /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.cargo || "", r.area ? " \xB7 " + r.area : "", r.dept ? " \xB7 " + r.dept : "")),
       /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, color: "#22C55E", fontWeight: 700 } }, "\uFF0B")
     ))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 18px", borderTop: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F8FAFC" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#64748B" } }, "Lista actual: ", grupo.members.length, " personas"), /* @__PURE__ */ React.createElement("button", { onClick: cerrarYAplicar, style: { padding: "6px 14px", borderRadius: 8, border: "1px solid #CBD5E1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 } }, addToListExtraBosses.length > 0 ? `\u2713 Aplicar y cerrar` : "Cerrar"))));
-  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "2px 6px", borderRadius: 6 } }, "v12.5"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
+  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "2px 6px", borderRadius: 6 } }, "v13"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
     setRosterQ("");
     setAddTab("persona");
     setPanel("add");
@@ -1462,10 +1497,26 @@ Si te equivocas, vuelve a darle clic para invertir de nuevo.`)) return;
   })))), panel === "edit" && editNode && /* @__PURE__ */ React.createElement("div", { style: { width: 280, background: "#fff", borderRight: "1px solid #E2E8F0", padding: 18, overflowY: "auto", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: "#0F172A", marginBottom: 14 } }, editNode.tipo === "grupo" ? "Editar grupo" : "Editar persona"), editNode.tipo === "persona" && (() => {
     const c = col(editArea);
     return /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 16 } }, /* @__PURE__ */ React.createElement("div", { onClick: () => fotoRef.current?.click(), style: { width: 84, height: 84, borderRadius: "50%", margin: "0 auto 6px", background: c.bg, border: `3px solid ${c.border}`, overflow: "hidden", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" } }, editFoto ? /* @__PURE__ */ React.createElement("img", { src: editFoto, style: { width: "100%", height: "100%", objectFit: "cover" } }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24, fontWeight: 700, color: c.text } }, ini(editNombre || editNode.nombre))), /* @__PURE__ */ React.createElement("input", { ref: fotoRef, type: "file", accept: "image/*", onChange: uploadFoto, style: { display: "none" } }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { onClick: () => fotoRef.current?.click(), style: { fontSize: 11, color: "#3B82F6", cursor: "pointer" } }, "\u{1F4F7} Cambiar foto")));
-  })(), editNode.tipo === "persona" && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14, paddingBottom: 14, borderBottom: "1px dashed #E2E8F0" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 } }, "Datos"), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Nombre *"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editNombre, onChange: (e) => setEditNombre(e.target.value) })), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Cargo"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-cargo", value: editCargo, onChange: (e) => setEditCargo(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-cargo" }, uniqueCargos.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Sede / \xC1rea"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-area", value: editArea, onChange: (e) => setEditArea(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-area" }, uniqueSedes.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Departamento"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-dept", value: editDept, onChange: (e) => setEditDept(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-dept" }, uniqueDepts.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Email"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editEmail, onChange: (e) => setEditEmail(e.target.value) }))), editNode.tipo === "grupo" && (() => {
+  })(), editNode.tipo === "persona" && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14, paddingBottom: 14, borderBottom: "1px dashed #E2E8F0" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 } }, "Datos"), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Nombre *"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editNombre, onChange: (e) => setEditNombre(e.target.value) })), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Cargo"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-cargo", value: editCargo, onChange: (e) => setEditCargo(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-cargo" }, uniqueCargos.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Sede / \xC1rea"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-area", value: editArea, onChange: (e) => setEditArea(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-area" }, uniqueSedes.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Departamento"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, list: "dl-dept", value: editDept, onChange: (e) => setEditDept(e.target.value) }), /* @__PURE__ */ React.createElement("datalist", { id: "dl-dept" }, uniqueDepts.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v })))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Email"), /* @__PURE__ */ React.createElement("input", { className: "inp", style: { fontSize: 12, padding: "6px 10px" }, value: editEmail, onChange: (e) => setEditEmail(e.target.value) })), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 11, color: "#64748B", marginBottom: 2 } }, "Nivel jer\xE1rquico (orden en la fila)"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } }, [
+    { v: "", l: "Auto (detectar)", bg: "#F1F5F9", bd: "#CBD5E1", fg: "#475569" },
+    { v: "master", l: "1\uFE0F\u20E3 Master", bg: "#DBEAFE", bd: "#3B82F6", fg: "#1E40AF" },
+    { v: "senior", l: "2\uFE0F\u20E3 Senior", bg: "#DCFCE7", bd: "#22C55E", fg: "#15803D" },
+    { v: "junior", l: "3\uFE0F\u20E3 Junior", bg: "#FEF3C7", bd: "#F59E0B", fg: "#92400E" }
+  ].map((opt) => {
+    const active = (editAdminLevel || "") === opt.v;
+    return /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: opt.v || "auto",
+        onClick: () => setEditAdminLevel(opt.v),
+        style: { padding: "4px 9px", borderRadius: 6, border: active ? `1.5px solid ${opt.bd}` : "1px solid #E2E8F0", background: active ? opt.bg : "#fff", color: active ? opt.fg : "#64748B", cursor: "pointer", fontSize: 11, fontWeight: active ? 700 : 500 }
+      },
+      opt.l
+    );
+  })), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#94A3B8", marginTop: 4, lineHeight: 1.4 } }, "\u{1F4A1} Auto = detecta del cargo. Override manual si el cargo no incluye master/senior/junior pero quieres ordenar igual."))), editNode.tipo === "grupo" && (() => {
     const g = gcol(editColor ? { customColor: editColor } : editNode);
     const presets = ["#3B82F6", "#22C55E", "#A855F7", "#F97316", "#EF4444", "#14B8A6", "#EAB308", "#EC4899", "#0EA5E9", "#84CC16", "#8B5CF6", "#F59E0B"];
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 54, height: 54, borderRadius: 12, margin: "0 auto 6px", background: g.bg, border: `2px solid ${g.border}`, display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 22 } }, "\u{1F3E2}")), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8" } }, "Vista previa")), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 } }, "Nombre del grupo / sede"), /* @__PURE__ */ React.createElement("input", { className: "inp", value: editNombre, onChange: (e) => setEditNombre(e.target.value), placeholder: "Ej: SC PALMITEX" })), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 } }, "Color"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } }, /* @__PURE__ */ React.createElement("input", { type: "color", value: editColor || "#3B82F6", onChange: (e) => setEditColor(e.target.value), style: { width: 46, height: 34, border: "1px solid #CBD5E1", borderRadius: 6, cursor: "pointer", padding: 2, background: "#fff" } }), /* @__PURE__ */ React.createElement("input", { className: "inp", value: editColor, onChange: (e) => setEditColor(e.target.value), placeholder: "#3B82F6 (hex)", style: { flex: 1, fontFamily: "monospace", fontSize: 12 } }), editColor && /* @__PURE__ */ React.createElement("button", { onClick: () => setEditColor(""), style: { padding: "5px 10px", border: "1px solid #CBD5E1", background: "#fff", borderRadius: 6, cursor: "pointer", fontSize: 11 } }, "Por defecto")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5 } }, presets.map((c) => /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { textAlign: "center", marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 54, height: 54, borderRadius: 12, margin: "0 auto 6px", background: g.bg, border: `2px solid ${g.border}`, display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement(CanaIcon, { size: 28, color: g.text })), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#94A3B8" } }, "Vista previa")), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 } }, "Nombre del grupo / sede"), /* @__PURE__ */ React.createElement("input", { className: "inp", value: editNombre, onChange: (e) => setEditNombre(e.target.value), placeholder: "Ej: SC PALMITEX" })), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 } }, "Color"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } }, /* @__PURE__ */ React.createElement("input", { type: "color", value: editColor || "#3B82F6", onChange: (e) => setEditColor(e.target.value), style: { width: 46, height: 34, border: "1px solid #CBD5E1", borderRadius: 6, cursor: "pointer", padding: 2, background: "#fff" } }), /* @__PURE__ */ React.createElement("input", { className: "inp", value: editColor, onChange: (e) => setEditColor(e.target.value), placeholder: "#3B82F6 (hex)", style: { flex: 1, fontFamily: "monospace", fontSize: 12 } }), editColor && /* @__PURE__ */ React.createElement("button", { onClick: () => setEditColor(""), style: { padding: "5px 10px", border: "1px solid #CBD5E1", background: "#fff", borderRadius: 6, cursor: "pointer", fontSize: 11 } }, "Por defecto")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5 } }, presets.map((c) => /* @__PURE__ */ React.createElement(
       "button",
       {
         key: c,
@@ -1720,7 +1771,7 @@ Si solo quieres marcarlo como retirado pero conservar el registro, usa el bot\xF
               padding: "0 14px",
               cursor: modoAsignar_g ? "crosshair" : "pointer",
               position: "relative"
-            } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, flexShrink: 0 } }, "\u{1F3E2}"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: esJefeActDelOrigen_g ? "#fff" : modoAsignar_g ? "#78350F" : g.text, lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word", textAlign: "left" } }, n.nombre), esJefeActDelOrigen_g && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: "50%", background: "#22C55E", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, boxShadow: "0 2px 6px rgba(0,0,0,.3)", border: "2px solid #fff" } }, "\u2713"), isSel && !modoAsignar_g && /* @__PURE__ */ React.createElement(
+            } }, /* @__PURE__ */ React.createElement(CanaIcon, { size: 18, color: esJefeActDelOrigen_g ? "#fff" : modoAsignar_g ? "#78350F" : g.text }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: esJefeActDelOrigen_g ? "#fff" : modoAsignar_g ? "#78350F" : g.text, lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word", textAlign: "left" } }, n.nombre), esJefeActDelOrigen_g && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: "50%", background: "#22C55E", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, boxShadow: "0 2px 6px rgba(0,0,0,.3)", border: "2px solid #fff" } }, "\u2713"), isSel && !modoAsignar_g && /* @__PURE__ */ React.createElement(
               "div",
               {
                 onClick: (e) => {
@@ -1819,7 +1870,12 @@ Si solo quieres marcarlo como retirado pero conservar el registro, usa el bot\xF
             overflow: "hidden",
             position: "relative",
             cursor: modoAsignar ? "crosshair" : "pointer"
-          } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: c.border } }), esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 12, left: 12, width: 22, height: 22, borderRadius: "50%", background: "#22C55E", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, zIndex: 5, boxShadow: "0 2px 6px rgba(34,197,94,.4)" } }, "\u2713"), tieneMultiplesJefes && !modoAsignar && !esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { title: `${parentsList.length} jefes`, style: { position: "absolute", top: 12, left: 12, padding: "2px 7px", borderRadius: 10, background: "#F3E8FF", color: "#7E22CE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, zIndex: 5, border: "1px solid #D8B4FE" } }, parentsList.length, "\u2687"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16, width: FOTO_SZ, height: FOTO_SZ, borderRadius: "50%", background: c.bg, border: `3px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.08)" } }, n.foto ? /* @__PURE__ */ React.createElement("img", { src: n.foto, style: { width: "100%", height: "100%", objectFit: "cover" }, alt: n.nombre }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 26, fontWeight: 700, color: c.text, letterSpacing: "-0.02em" } }, ini(n.nombre))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, padding: "0 8px", width: "100%", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" } }, n.nombre), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 2, padding: "0 8px", width: "100%", textAlign: "center", fontSize: 10, color: "#64748B", lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" } }, n.cargo), badgeVal && !badgeRedundant && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 5, background: c.bg, borderRadius: 4, padding: "2px 8px", maxWidth: "calc(100% - 16px)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: c.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "100%" } }, trunc(n.area || n.dept, 22))), esAncestroCompacto && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 8, left: 8, fontSize: 8, fontWeight: 700, color: "#0F766E", background: "#CCFBF1", padding: "1px 6px", borderRadius: 8, letterSpacing: "0.03em" } }, "HIJOS EN LISTA"), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { title: "Editar", onClick: (e) => {
+          } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: c.border } }), esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 12, left: 12, width: 22, height: 22, borderRadius: "50%", background: "#22C55E", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, zIndex: 5, boxShadow: "0 2px 6px rgba(34,197,94,.4)" } }, "\u2713"), tieneMultiplesJefes && !modoAsignar && !esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { title: `${parentsList.length} jefes`, style: { position: "absolute", top: 12, left: 12, padding: "2px 7px", borderRadius: 10, background: "#F3E8FF", color: "#7E22CE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, zIndex: 5, border: "1px solid #D8B4FE" } }, parentsList.length, "\u2687"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16, width: FOTO_SZ, height: FOTO_SZ, borderRadius: "50%", background: c.bg, border: `3px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.08)" } }, n.foto ? /* @__PURE__ */ React.createElement("img", { src: n.foto, style: { width: "100%", height: "100%", objectFit: "cover" }, alt: n.nombre }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 26, fontWeight: 700, color: c.text, letterSpacing: "-0.02em" } }, ini(n.nombre))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, padding: "0 8px", width: "100%", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" } }, n.nombre), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 2, padding: "0 8px", width: "100%", textAlign: "center", fontSize: 10, color: "#64748B", lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" } }, n.cargo), badgeVal && !badgeRedundant && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 5, background: c.bg, borderRadius: 4, padding: "2px 8px", maxWidth: "calc(100% - 16px)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: c.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "100%" } }, trunc(n.area || n.dept, 22))), esAncestroCompacto && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 8, left: 8, fontSize: 8, fontWeight: 700, color: "#0F766E", background: "#CCFBF1", padding: "1px 6px", borderRadius: 8, letterSpacing: "0.03em" } }, "HIJOS EN LISTA"), (() => {
+            const lvl = adminLevelOf(n);
+            if (lvl === 99) return null;
+            const cfg = lvl === 1 ? { n: "M", t: "Master", bg: "#1E40AF", fg: "#fff" } : lvl === 2 ? { n: "S", t: "Senior", bg: "#15803D", fg: "#fff" } : { n: "J", t: "Junior", bg: "#D97706", fg: "#fff" };
+            return /* @__PURE__ */ React.createElement("div", { title: `Admin ${cfg.t}`, style: { position: "absolute", top: 10, left: 10, width: 18, height: 18, borderRadius: "50%", background: cfg.bg, color: cfg.fg, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, boxShadow: "0 1px 3px rgba(0,0,0,.15)" } }, cfg.n);
+          })(), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { title: "Editar", onClick: (e) => {
             e.stopPropagation();
             openEdit(n);
           }, style: { width: 26, height: 26, borderRadius: 7, background: c.bg, border: `1px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" } }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 16 16", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M11 2l3 3-9 9H2v-3L11 2z", stroke: c.text, strokeWidth: "1.5", strokeLinejoin: "round" }))), /* @__PURE__ */ React.createElement("div", { title: "Asignar jefe (clic en otro nodo)", onClick: (e) => {
