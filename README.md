@@ -1,32 +1,29 @@
-# Organigramast v12.3 — Supertiendas Cañaveral
+# Organigramast v12.5 — Supertiendas Cañaveral
 
-## Novedad: Gestión de personas en el roster
+## Cambios
 
-Cuando edites una persona, al final del panel aparece una nueva sección
-"GESTIÓN EN EL ROSTER" con dos botones:
+### 1. Nueva persona: formulario simplificado
+Sin foto, solo: Nombre*, Cargo, Sede, Depto, Email.
 
-### ⚠️ Marcar como retirado (botón naranja)
-- La persona se marca con bandera ⚠️ RETIRADO en el roster
-- No aparece en búsquedas para agregar al chart
-- No aparece en el modal "Agregar a lista"
-- Sigue visible en el panel izquierdo con el nombre tachado y opacidad reducida
-- Si está en el chart, te pregunta si también quitarla
-- Reversible: el botón cambia a "↻ Reactivar" para volver a normal
+### 2. Descargar roster: columnas exactas del maestro
+Ahora el Excel descargado tiene las MISMAS columnas del maestro original:
+- Codigo Unico
+- Empleado
+- Nombre del empleado
+- Descripcion C.O.
+- Descripcion del cargo
+- Descripcion ccosto
+- Email del contacto
+- **retirado** (única columna nueva: SI o vacío)
 
-### 🗑 Eliminar del roster definitivo (botón rojo)
-- Borra la persona del roster por completo
-- Si está en el chart, también la quita
-- Doble confirmación
-- No se puede deshacer (a menos que recargues el maestro)
+Puedes volver a cargar este mismo Excel como maestro y la app respeta:
+- Todos los datos de personas
+- La marca de retirado (la columna se reconoce automáticamente)
 
-## Otras protecciones
+### 3. PDF en blanco — fix de v12.4 sigue activo
+Más delays + validación de canvas vacío + opciones conservadoras.
 
-- Si intentas agregar al chart una persona retirada manualmente, la app pregunta antes
-- Las personas retiradas NO aparecen en el buscador de jefes (Editar persona → Buscar jefe)
-- Las personas retiradas NO aparecen en el modal "Agregar a lista"
-- En el panel izquierdo SÍ aparecen para que puedas verlas y reactivarlas
-
-Etiqueta visible: **v12.3**
+## Etiqueta visible: **v12.5**
 
 ## Archivos
 - `index.html`, `App.jsx`

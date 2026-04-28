@@ -336,6 +336,9 @@ export default function App(){
   const [addToListQ, setAddToListQ] = useState("");
   /* v11.1: filtros y jefes extra en el modal */
   const [addToListFilters, setAddToListFilters] = useState({sede:[], cargo:[], dept:[]});
+  /* v12.4: modal de nueva persona manual al roster */
+  const [newPersonOpen, setNewPersonOpen] = useState(false);
+  const [newPerson, setNewPerson] = useState({nombre:"",cargo:"",area:"",dept:"",email:"",foto:""});
   const [addToListExtraBosses, setAddToListExtraBosses] = useState([]); // ids de jefes extra a agregar a TODA la lista + nuevas personas
   const [addToListBossQ, setAddToListBossQ] = useState("");
 
@@ -521,7 +524,10 @@ export default function App(){
     const newRoster=rows.map((row,i)=>{
       const nombre=get(row,"nombre"); if(!nombre)return null;
       const emailRaw=row["Email del contacto"]||row["Email"]||row["email"]||"";
-      return{id:get(row,"id")||`r${i}_${Date.now()}`,nombre,cargo:get(row,"cargo"),area:get(row,"area"),dept:get(row,"dept"),email:String(emailRaw).trim(),foto:"",tipo:"persona"};
+      /* v12.5: reconocer columna 'retirado' al re-importar */
+      const retiradoRaw = row["retirado"]||row["Retirado"]||row["RETIRADO"]||"";
+      const retirado = String(retiradoRaw).trim().toUpperCase()==="SI" || String(retiradoRaw).trim().toUpperCase()==="TRUE" || String(retiradoRaw).trim()==="1";
+      return{id:get(row,"id")||`r${i}_${Date.now()}`,nombre,cargo:get(row,"cargo"),area:get(row,"area"),dept:get(row,"dept"),email:String(emailRaw).trim(),foto:"",tipo:"persona",...(retirado?{retirado:true}:{})};
     }).filter(Boolean);
 
     /* Primera vez: comportamiento IDÉNTICO a v3 */
@@ -606,6 +612,49 @@ export default function App(){
     }
     if(nodes.length===0){ setNodes(p=>[...p,{...r,parentId:"",tipo:"persona"}]); return; }
     setQuickAdd({person:r,parentIds:[],q:""});
+  };
+
+  /* v12.4: agregar persona MANUAL al roster (no del Excel) */
+  const addNewPersonToRoster=()=>{
+    if(!newPerson.nombre.trim()){ alert("El nombre es obligatorio"); return; }
+    const nueva={
+      id: `manual_${Date.now()}_${Math.floor(Math.random()*1000)}`,
+      nombre: newPerson.nombre.trim(),
+      cargo: newPerson.cargo.trim(),
+      area: newPerson.area.trim(),
+      dept: newPerson.dept.trim(),
+      email: newPerson.email.trim(),
+      foto: newPerson.foto||"",
+      tipo: "persona",
+      manual: true, /* marca para identificar que fue agregada manualmente */
+    };
+    setRoster(r=>[nueva, ...r]);
+    setNewPersonOpen(false);
+    setNewPerson({nombre:"",cargo:"",area:"",dept:"",email:"",foto:""});
+  };
+
+  /* v12.5: descargar roster como Excel respetando columnas exactas del maestro original + columna retirado */
+  const exportRosterXLSX=()=>{
+    if(!roster.length){ alert("No hay roster que exportar"); return; }
+    if(!window.XLSX){ alert("Librería Excel no cargada, intenta de nuevo en 2 segundos"); return; }
+    const rows = roster.map(r=>({
+      "Codigo Unico": r.id,
+      "Empleado": r.nombre,
+      "Nombre del empleado": r.nombre,
+      "Descripcion C.O.": r.area||"",
+      "Descripcion del cargo": r.cargo||"",
+      "Descripcion ccosto": r.dept||"",
+      "Email del contacto": r.email||"",
+      "retirado": r.retirado ? "SI" : "",
+    }));
+    const ws = window.XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [
+      {wch:14}, {wch:30}, {wch:30}, {wch:22}, {wch:25}, {wch:22}, {wch:28}, {wch:10}
+    ];
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, "Roster");
+    const fecha = new Date().toISOString().slice(0,10);
+    window.XLSX.writeFile(wb, `roster_canaveral_${fecha}.xlsx`);
   };
   const confirmQuickAdd=()=>{
     if(!quickAdd)return;
@@ -884,7 +933,6 @@ export default function App(){
     if(!chartRef.current||pdfLoading)return;
     if(!nodes.length){ alert("No hay nada que exportar"); return; }
     setPdfLoading(true);
-    /* Guardamos viewport actual y estilo del chartRef para restaurar al final */
     const prevVp={...vp};
     const el=chartRef.current;
     const prevStyle={
@@ -893,18 +941,21 @@ export default function App(){
       width:el.style.width,
       height:el.style.height,
       overflow:el.style.overflow,
+      left:el.style.left,
+      top:el.style.top,
     };
     try{
       const h2c=window.html2canvas;
       const jsPDF=window.jspdf?.jsPDF;
       if(!h2c||!jsPDF){setPdfLoading(false);alert("Librerías PDF cargando, intenta en 2 segundos.");return;}
 
-      /* Resetear viewport para que los nodos queden en (p.x, p.y) sin offset */
+      /* Resetear viewport */
       setVp({x:0,y:0,s:1});
-      /* Esperar a que React renderice con el nuevo viewport */
-      await new Promise(r=>setTimeout(r,200));
+      /* Esperar varios frames a que React + el browser hagan layout */
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      await new Promise(r=>setTimeout(r,400));
 
-      /* Expandir temporalmente el chartRef para que h2c vea todo el contenido absolute-positioned */
+      /* Expandir el chartRef para que h2c vea todo */
       el.style.position="absolute";
       el.style.inset="auto";
       el.style.left="0";
@@ -913,28 +964,40 @@ export default function App(){
       el.style.height=H+"px";
       el.style.overflow="visible";
 
-      await new Promise(r=>setTimeout(r,50));
+      /* Dar 2 frames más para que el browser repinte con el nuevo tamaño */
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      await new Promise(r=>setTimeout(r,300));
 
       const canvas=await h2c(el,{
         scale:2,
         backgroundColor:"#F8FAFC",
         useCORS:true,
+        allowTaint:false,
         logging:false,
+        foreignObjectRendering:false,
         width:W,
         height:H,
         windowWidth:W,
         windowHeight:H,
+        x:0,
+        y:0,
+        scrollX:0,
+        scrollY:0,
       });
+
+      /* Validar que el canvas tiene contenido (no todo blanco) */
+      if(canvas.width<10||canvas.height<10){
+        throw new Error(`Canvas vacío (${canvas.width}x${canvas.height}). Recarga la página y vuelve a intentar.`);
+      }
+
       const imgData=canvas.toDataURL("image/png");
       const w2=canvas.width/2, h2=canvas.height/2;
       const pdf=new jsPDF({orientation: w2>h2?"landscape":"portrait",unit:"px",format:[w2,h2]});
       pdf.addImage(imgData,"PNG",0,0,w2,h2);
       pdf.save(`organigrama_${new Date().toISOString().slice(0,10)}.pdf`);
-    }catch(err){console.error(err);alert("Error al generar PDF: "+err.message);}
-    /* Restaurar estilo del chartRef */
+    }catch(err){console.error("PDF error:",err);alert("Error al generar PDF: "+err.message+"\n\nPrueba a recargar la página y reintentar.");}
+    /* Restaurar SIEMPRE */
     Object.entries(prevStyle).forEach(([k,v])=>{ el.style[k]=v||""; });
-    el.style.left=""; el.style.top="";
-    /* Restaurar viewport */
     setVp(prevVp);
     setPdfLoading(false);
   },[pdfLoading,nodes.length,W,H,vp]);
@@ -1094,6 +1157,52 @@ export default function App(){
           </div>
         );
       })()}
+
+      {/* v12.4: Modal nueva persona manual al roster */}
+      {newPersonOpen && (
+        <div onClick={()=>setNewPersonOpen(false)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.5)",zIndex:99,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{width:460,maxWidth:"92vw",maxHeight:"88vh",background:"#fff",borderRadius:14,boxShadow:"0 20px 60px rgba(0,0,0,.3)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"14px 18px",borderBottom:"1px solid #E2E8F0",background:"#F0FDF4"}}>
+              <div style={{fontSize:15,fontWeight:700,color:"#0F172A"}}>➕ Nueva persona al roster</div>
+              <div style={{fontSize:11,color:"#64748B",marginTop:3}}>Crea una persona manualmente sin tocar el Excel maestro</div>
+            </div>
+            <div style={{padding:"16px 18px",overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:10}}>
+              <div>
+                <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:4}}>Nombre completo *</label>
+                <input className="inp" autoFocus value={newPerson.nombre} onChange={e=>setNewPerson(p=>({...p,nombre:e.target.value}))} placeholder="Ej: JUAN PEREZ GOMEZ"/>
+              </div>
+              <div>
+                <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:4}}>Cargo</label>
+                <input className="inp" value={newPerson.cargo} onChange={e=>setNewPerson(p=>({...p,cargo:e.target.value}))} placeholder="Ej: SUPERVISOR DE CAJAS"/>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <div style={{flex:1}}>
+                  <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:4}}>Sede</label>
+                  <input className="inp" value={newPerson.area} onChange={e=>setNewPerson(p=>({...p,area:e.target.value}))} placeholder="Ej: SC PALMITEX" list="sede-options-new"/>
+                  <datalist id="sede-options-new">
+                    {[...new Set(roster.map(r=>r.area).filter(Boolean))].sort().map(s=><option key={s} value={s}/>)}
+                  </datalist>
+                </div>
+                <div style={{flex:1}}>
+                  <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:4}}>Depto</label>
+                  <input className="inp" value={newPerson.dept} onChange={e=>setNewPerson(p=>({...p,dept:e.target.value}))} placeholder="Opcional" list="dept-options-new"/>
+                  <datalist id="dept-options-new">
+                    {[...new Set(roster.map(r=>r.dept).filter(Boolean))].sort().map(d=><option key={d} value={d}/>)}
+                  </datalist>
+                </div>
+              </div>
+              <div>
+                <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:4}}>Email</label>
+                <input className="inp" type="email" value={newPerson.email} onChange={e=>setNewPerson(p=>({...p,email:e.target.value}))} placeholder="opcional@empresa.com"/>
+              </div>
+            </div>
+            <div style={{padding:"10px 18px",borderTop:"1px solid #E2E8F0",display:"flex",justifyContent:"flex-end",gap:8,background:"#F8FAFC"}}>
+              <button onClick={()=>setNewPersonOpen(false)} style={{padding:"7px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#fff",cursor:"pointer",fontSize:12,fontWeight:600}}>Cancelar</button>
+              <button onClick={addNewPersonToRoster} disabled={!newPerson.nombre.trim()} style={{padding:"7px 14px",borderRadius:8,border:"none",background:newPerson.nombre.trim()?"#22C55E":"#CBD5E1",color:"#fff",cursor:newPerson.nombre.trim()?"pointer":"not-allowed",fontSize:12,fontWeight:600}}>✓ Crear persona</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* v11.1: Modal "Agregar persona a esta lista" — con filtros y gestión de jefes extra */}
       {addToListKey && autoGroups[addToListKey] && (()=>{
@@ -1326,7 +1435,7 @@ export default function App(){
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"#fff",borderBottom:"1px solid #E2E8F0",flexShrink:0,flexWrap:"wrap"}}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="8" y="2" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="2" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="14" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><path d="M12 9v3M6 15v-3h12v3" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
         <span style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Organigrama</span>
-        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12.3</span>
+        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12.5</span>
         {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
         {!dirty && memFileName && <span style={{fontSize:11,color:"#15803D",fontWeight:600}} title={memFileName}>✓ guardado</span>}
         {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:"#F0FDF4",color:"#15803D",borderRadius:20,fontWeight:600}}>{roster.length} en roster</span>}
@@ -1450,6 +1559,19 @@ export default function App(){
             {/* Tab: Personas */}
             {addTab==="persona"&&(
               <>
+                <div style={{padding:"0 14px 8px",flexShrink:0,display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button onClick={()=>{setNewPerson({nombre:"",cargo:"",area:"",dept:"",email:"",foto:""});setNewPersonOpen(true);}}
+                    style={{flex:"1 1 auto",padding:"6px 10px",borderRadius:8,border:"1px solid #22C55E",background:"#F0FDF4",color:"#15803D",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>
+                    ➕ Nueva persona
+                  </button>
+                  {roster.length>0 && (
+                    <button onClick={exportRosterXLSX}
+                      style={{flex:"1 1 auto",padding:"6px 10px",borderRadius:8,border:"1px solid #3B82F6",background:"#EFF6FF",color:"#1E40AF",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}
+                      title="Descargar el roster actualizado en formato Excel del maestro original">
+                      📥 Descargar roster
+                    </button>
+                  )}
+                </div>
                 <div style={{padding:"0 14px 8px",flexShrink:0}}>
                   <input className="inp" value={rosterQ} onChange={e=>setRosterQ(e.target.value)} placeholder={roster.length?`Buscar en ${roster.length} personas…`:"No hay personas cargadas"} autoFocus/>
                   {/* v7: Filtros multi-select con chips */}
