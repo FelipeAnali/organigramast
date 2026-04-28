@@ -1,33 +1,38 @@
-# Organigramast v12 — Supertiendas Cañaveral
+# Organigramast v12.1 — Supertiendas Cañaveral
 
 ## Novedades
 
-### 1. Editar nombre y color de los grupos (sedes 🏢)
+### 1. Nombres en 2 líneas (sin truncado feo)
+- Tarjetas de persona ahora muestran nombre y cargo en hasta 2 líneas
+- El cuadro mantiene su tamaño fijo (no se ensancha)
+- Si el nombre es muy largo, se corta limpiamente con "..."
 
-Selecciona un grupo → ✎ Editar. Ahora el panel del grupo muestra:
-- **Nombre** editable (antes era solo lectura)
-- **Color personalizado**:
-  - Color picker nativo del navegador (rueda completa)
-  - Input de hex manual (`#3B82F6`, etc.)
-  - 12 presets de un clic
-  - Botón "Por defecto" para volver al color automático
-- Vista previa en tiempo real del color que estás escogiendo
+### 2. Detección automática del formato APELLIDOS NOMBRES
+Al cargar el maestro, la app analiza los nombres con un diccionario
+de ~100 nombres comunes en Colombia (Jose, Maria, Oscar, etc.).
 
-El color se guarda en el nodo como `customColor` y persiste en el `.orgmem`.
+Si detecta que están en formato APELLIDOS NOMBRES (formato típico de nóminas),
+**te pregunta si quieres invertir automáticamente** a NOMBRES APELLIDOS.
 
-### 2. Selector de tipo de línea de conexión
+Ejemplo: `SANCHEZ OSORNO OSCAR` → `OSCAR SANCHEZ OSORNO`
 
-En la toolbar (al lado de los botones de exportar) aparece un selector con 3 opciones:
-- **╭╮ Curva** — el comportamiento de siempre (curvas suaves)
-- **┘└ Recta** — ángulos a 90° estilo organigrama clásico
-- **╲ Diagonal** — línea directa punto a punto
+Conserva mayúsculas tal como vienen.
 
-Es global para todo el chart. Cambia las líneas normales y también las de las cajas-lista.
+### 3. Botón manual "Reordenar nombres"
+En la toolbar (al lado del selector de líneas) aparece un botón **⇄ Reordenar nombres**.
+- Confirma antes de ejecutar (te dice cuántas personas afecta)
+- Invierte TODOS los nombres del roster + chart de un golpe
+- Si te equivocas, vuelve a darle clic y se reinvierte
+
+### Cómo funciona la inversión
+- 2 palabras: invierte (`Pedro Gomez` → `Gomez Pedro`)
+- 3 palabras: última al inicio (`Sanchez Osorno Oscar` → `Oscar Sanchez Osorno`)
+- 4 palabras: últimas 2 al inicio (`Garcia Lopez Juan Pablo` → `Juan Pablo Garcia Lopez`)
+- 5+ palabras: igual que 4 (asume 2 nombres + N apellidos)
 
 ## Versión visible
 
-Si al subir esta versión ves "v12" en gris al lado del título → cargó bien.
-Si ves "v11.1" o nada → es caché del navegador. Solución: `Ctrl+Shift+R` o ventana incógnita.
+Etiqueta gris **"v12.1"** al lado del título "Organigrama".
 
 ## Archivos
 

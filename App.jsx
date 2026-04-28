@@ -51,6 +51,67 @@ function primaryParentOf(n){
   return ps[0] || "";
 }
 
+/* v12: invertir un nombre tipo "APELLIDO1 APELLIDO2 NOMBRE1 NOMBRE2" → "NOMBRE1 NOMBRE2 APELLIDO1 APELLIDO2".
+   Heurística colombiana típica:
+   - 4 palabras: 2 apellidos + 2 nombres → mover últimas 2 al inicio
+   - 3 palabras: 2 apellidos + 1 nombre → mover última al inicio
+   - 2 palabras: 1 apellido + 1 nombre → invertir
+   - 5+ palabras: caso raro, mover últimas 2 al inicio (asume 2 nombres compuestos)
+   - 1 palabra o menos: dejar igual */
+function invertirNombre(s){
+  if(!s) return s;
+  const partes = s.trim().split(/\s+/);
+  if(partes.length<=1) return s;
+  if(partes.length===2) return `${partes[1]} ${partes[0]}`;
+  if(partes.length===3) return `${partes[2]} ${partes[0]} ${partes[1]}`;
+  /* 4+: las últimas 2 al inicio */
+  const apellidos = partes.slice(0, partes.length-2);
+  const nombres = partes.slice(partes.length-2);
+  return `${nombres.join(" ")} ${apellidos.join(" ")}`;
+}
+
+/* v12: detectar si una lista de nombres está en formato APELLIDOS NOMBRES.
+   Heurística:
+   - Si hay nombres muy comunes (JOSE, MARIA, JUAN, LUIS, etc) que aparecen
+     en posición FINAL más veces que en posición INICIAL → formato apellidos-primero.
+   - Margen de seguridad: necesitamos al menos 60% de coincidencia. */
+function detectarFormatoApellidosPrimero(roster){
+  const nombresComunes = new Set([
+    "JOSE","MARIA","JUAN","LUIS","CARLOS","JORGE","MIGUEL","ANGEL","ANA","ANDRES",
+    "DAVID","DIEGO","DANIEL","FERNANDO","FRANCISCO","JAVIER","RICARDO","ANTONIO",
+    "MANUEL","ALEJANDRO","SANTIAGO","SEBASTIAN","CRISTIAN","KEVIN","BRYAN","WILMER",
+    "OSCAR","RAFAEL","ALBERTO","EDGAR","HERNAN","CESAR","RAUL","PEDRO","PABLO","MARIO",
+    "ALEXANDER","NICOLAS","FABIAN","CAMILO","JULIAN","GERMAN","HECTOR","HUGO","ARMANDO",
+    "GUSTAVO","HENRY","JAIRO","JESUS","LAURA","SOFIA","DIANA","CAROLINA","CLAUDIA","PATRICIA",
+    "SANDRA","MARTHA","GLORIA","ADRIANA","LILIANA","BEATRIZ","CAROLINA","NATALIA","PAULA",
+    "VALENTINA","DANIELA","CATALINA","LINA","JENNIFER","KATHERINE","STEFANY","JESSICA",
+    "ANGELICA","JOHANA","JOHANNA","YULIANA","YENI","EDNA","DERLY","ROSA","MARTHA","JIMENA",
+    "JIMMY","JEIMY","ENAY","LIBNI","JHON","JOHN","ANDERSON","WILLIAM","STIVEN","STEVEN",
+    "RICHARD","JEFFERSON","JEISON","BRAYAN","FELIPE","LUZ","ROSALBA","CRISTINA","MARCELA",
+    "ALEXANDRA","XIMENA","BIBIANA","ISABEL","LEIDY","NUBIA","NOHORA","DORIS","ELIZABETH",
+    "FERNANDA","LIZBETH","LIZETH","JOANA","KATHERIN","KATHERINE","MARLENY"
+  ]);
+  let coincidenciasFinal=0, coincidenciasInicio=0;
+  let total=0;
+  roster.forEach(r=>{
+    const nombre=(r.nombre||"").trim().toUpperCase();
+    if(!nombre) return;
+    const partes = nombre.split(/\s+/);
+    if(partes.length<2) return;
+    total++;
+    /* última palabra es nombre común */
+    if(nombresComunes.has(partes[partes.length-1])) coincidenciasFinal++;
+    /* primera palabra es nombre común */
+    if(nombresComunes.has(partes[0])) coincidenciasInicio++;
+  });
+  if(total<5) return false; // no hay suficiente data para decidir
+  /* si las últimas palabras son nombres comunes en >55% de los casos
+     y MÁS frecuente que en posición inicial → formato apellidos-primero */
+  const ratioFinal = coincidenciasFinal/total;
+  const ratioInicio = coincidenciasInicio/total;
+  return ratioFinal>=0.55 && ratioFinal > ratioInicio + 0.15;
+}
+
 function buildLayout(nodes, compactSet, autoGroups){
   compactSet = compactSet || new Set();
   autoGroups = autoGroups || {};
@@ -466,7 +527,14 @@ export default function App(){
     /* Primera vez: comportamiento IDÉNTICO a v3 */
     if(impMode==="initial"){
       suppressDirty.current=1; // primer import no debe marcar dirty
-      setRoster(newRoster); setNodes([]); setSel(null);
+      /* v12: detectar si el formato es APELLIDOS NOMBRES y avisar */
+      let rosterFinal=newRoster;
+      if(detectarFormatoApellidosPrimero(newRoster)){
+        if(confirm(`Detecté que los nombres están en formato APELLIDOS NOMBRES (ejemplo: "${newRoster.find(r=>r.nombre)?.nombre||"..."}").\n\n¿Quieres invertirlos al formato NOMBRES APELLIDOS automáticamente?\n\n(Puedes hacerlo después manualmente con el botón "Reordenar nombres")`)){
+          rosterFinal=newRoster.map(r=>({...r, nombre: invertirNombre(r.nombre)}));
+        }
+      }
+      setRoster(rosterFinal); setNodes([]); setSel(null);
       setImpRows([]); setImpHdrs([]);
       setPanel("add"); setAddTab("persona");
       return;
@@ -1254,7 +1322,7 @@ export default function App(){
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"#fff",borderBottom:"1px solid #E2E8F0",flexShrink:0,flexWrap:"wrap"}}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="8" y="2" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="2" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="14" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><path d="M12 9v3M6 15v-3h12v3" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
         <span style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Organigrama</span>
-        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12</span>
+        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12.1</span>
         {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
         {!dirty && memFileName && <span style={{fontSize:11,color:"#15803D",fontWeight:600}} title={memFileName}>✓ guardado</span>}
         {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:"#F0FDF4",color:"#15803D",borderRadius:20,fontWeight:600}}>{roster.length} en roster</span>}
@@ -1268,6 +1336,15 @@ export default function App(){
         <input ref={memRef} type="file" accept=".orgmem,.json" style={{display:"none"}} onChange={loadMem}/>
         <button className="btn g" onClick={saveMem} disabled={roster.length===0&&nodes.length===0} title="Descargar todo el trabajo como archivo portable">💾 Guardar memoria</button>
         {nodes.length>0&&<><button className="btn" onClick={exportJSON}>Exportar JSON</button><button className="btn o" onClick={exportPDF} disabled={pdfLoading}>{pdfLoading?"Generando…":"Descargar PDF"}</button></>}
+        {/* v12: botón reordenar nombres */}
+        {(roster.length>0 || nodes.length>0) && (
+          <button className="btn" onClick={()=>{
+            const total = roster.length + nodes.filter(n=>n.tipo==="persona").length;
+            if(!confirm(`¿Invertir todos los nombres del formato actual (APELLIDOS NOMBRES) a NOMBRES APELLIDOS?\n\nEsto afectará ${total} personas (roster + chart).\n\nEjemplo: "SANCHEZ OSORNO OSCAR" → "OSCAR SANCHEZ OSORNO"\n\nSi te equivocas, vuelve a darle clic para invertir de nuevo.`)) return;
+            setRoster(r=>r.map(x=>({...x, nombre: invertirNombre(x.nombre)})));
+            setNodes(p=>p.map(n=>n.tipo==="persona" ? {...n, nombre: invertirNombre(n.nombre)} : n));
+          }} title="Invertir orden: APELLIDOS NOMBRES ↔ NOMBRES APELLIDOS">⇄ Reordenar nombres</button>
+        )}
         {/* v12: selector de tipo de línea */}
         {nodes.length>0 && (
           <div title="Tipo de línea de conexión" style={{display:"flex",alignItems:"center",gap:4,padding:"3px 4px",background:"#F1F5F9",borderRadius:8,border:"1px solid #E2E8F0"}}>
@@ -2008,15 +2085,15 @@ export default function App(){
                         }
                       </div>
 
-                      {/* Nombre */}
-                      <div style={{marginTop:10,padding:"0 10px",width:"100%",textAlign:"center",fontSize:12,fontWeight:700,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>
-                        {trunc(n.nombre,22)}
+                      {/* Nombre — v12: hasta 2 líneas si no cabe */}
+                      <div style={{marginTop:8,padding:"0 8px",width:"100%",textAlign:"center",fontSize:12,fontWeight:700,color:"#0F172A",lineHeight:1.15,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",wordBreak:"break-word"}}>
+                        {n.nombre}
                       </div>
 
-                      {/* Cargo */}
+                      {/* Cargo — v12: 2 líneas si necesario */}
                       {n.cargo && (
-                        <div style={{marginTop:3,padding:"0 10px",width:"100%",textAlign:"center",fontSize:10,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>
-                          {trunc(n.cargo,26)}
+                        <div style={{marginTop:2,padding:"0 8px",width:"100%",textAlign:"center",fontSize:10,color:"#64748B",lineHeight:1.15,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",wordBreak:"break-word"}}>
+                          {n.cargo}
                         </div>
                       )}
 

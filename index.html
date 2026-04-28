@@ -6,8 +6,8 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
     <meta http-equiv="Pragma" content="no-cache"/>
     <meta http-equiv="Expires" content="0"/>
-    <meta name="version" content="v12-2cee1ebb"/>
-    <title>Organigrama Cañaveral v12</title>
+    <meta name="version" content="v12.1-adf45e64"/>
+    <title>Organigrama Cañaveral v12.1</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
       #root { height: 100%; }
@@ -20,8 +20,8 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   </head>
   <body>
-    <div id="root"><div id="loading">Cargando organigrama v12…</div></div>
-    <!-- build: 2cee1ebb / ts: 1777404368 -->
+    <div id="root"><div id="loading">Cargando organigrama v12.1…</div></div>
+    <!-- build: adf45e64 / ts: 1777406707 -->
     <script>
       const { useState, useMemo, useRef, useCallback, useEffect } = React;
 const PAL = [
@@ -64,6 +64,152 @@ function parentsOf(n) {
 function primaryParentOf(n) {
   const ps = parentsOf(n);
   return ps[0] || "";
+}
+function invertirNombre(s) {
+  if (!s) return s;
+  const partes = s.trim().split(/\s+/);
+  if (partes.length <= 1) return s;
+  if (partes.length === 2) return `${partes[1]} ${partes[0]}`;
+  if (partes.length === 3) return `${partes[2]} ${partes[0]} ${partes[1]}`;
+  const apellidos = partes.slice(0, partes.length - 2);
+  const nombres = partes.slice(partes.length - 2);
+  return `${nombres.join(" ")} ${apellidos.join(" ")}`;
+}
+function detectarFormatoApellidosPrimero(roster) {
+  const nombresComunes = /* @__PURE__ */ new Set([
+    "JOSE",
+    "MARIA",
+    "JUAN",
+    "LUIS",
+    "CARLOS",
+    "JORGE",
+    "MIGUEL",
+    "ANGEL",
+    "ANA",
+    "ANDRES",
+    "DAVID",
+    "DIEGO",
+    "DANIEL",
+    "FERNANDO",
+    "FRANCISCO",
+    "JAVIER",
+    "RICARDO",
+    "ANTONIO",
+    "MANUEL",
+    "ALEJANDRO",
+    "SANTIAGO",
+    "SEBASTIAN",
+    "CRISTIAN",
+    "KEVIN",
+    "BRYAN",
+    "WILMER",
+    "OSCAR",
+    "RAFAEL",
+    "ALBERTO",
+    "EDGAR",
+    "HERNAN",
+    "CESAR",
+    "RAUL",
+    "PEDRO",
+    "PABLO",
+    "MARIO",
+    "ALEXANDER",
+    "NICOLAS",
+    "FABIAN",
+    "CAMILO",
+    "JULIAN",
+    "GERMAN",
+    "HECTOR",
+    "HUGO",
+    "ARMANDO",
+    "GUSTAVO",
+    "HENRY",
+    "JAIRO",
+    "JESUS",
+    "LAURA",
+    "SOFIA",
+    "DIANA",
+    "CAROLINA",
+    "CLAUDIA",
+    "PATRICIA",
+    "SANDRA",
+    "MARTHA",
+    "GLORIA",
+    "ADRIANA",
+    "LILIANA",
+    "BEATRIZ",
+    "CAROLINA",
+    "NATALIA",
+    "PAULA",
+    "VALENTINA",
+    "DANIELA",
+    "CATALINA",
+    "LINA",
+    "JENNIFER",
+    "KATHERINE",
+    "STEFANY",
+    "JESSICA",
+    "ANGELICA",
+    "JOHANA",
+    "JOHANNA",
+    "YULIANA",
+    "YENI",
+    "EDNA",
+    "DERLY",
+    "ROSA",
+    "MARTHA",
+    "JIMENA",
+    "JIMMY",
+    "JEIMY",
+    "ENAY",
+    "LIBNI",
+    "JHON",
+    "JOHN",
+    "ANDERSON",
+    "WILLIAM",
+    "STIVEN",
+    "STEVEN",
+    "RICHARD",
+    "JEFFERSON",
+    "JEISON",
+    "BRAYAN",
+    "FELIPE",
+    "LUZ",
+    "ROSALBA",
+    "CRISTINA",
+    "MARCELA",
+    "ALEXANDRA",
+    "XIMENA",
+    "BIBIANA",
+    "ISABEL",
+    "LEIDY",
+    "NUBIA",
+    "NOHORA",
+    "DORIS",
+    "ELIZABETH",
+    "FERNANDA",
+    "LIZBETH",
+    "LIZETH",
+    "JOANA",
+    "KATHERIN",
+    "KATHERINE",
+    "MARLENY"
+  ]);
+  let coincidenciasFinal = 0, coincidenciasInicio = 0;
+  let total = 0;
+  roster.forEach((r) => {
+    const nombre = (r.nombre || "").trim().toUpperCase();
+    if (!nombre) return;
+    const partes = nombre.split(/\s+/);
+    if (partes.length < 2) return;
+    total++;
+    if (nombresComunes.has(partes[partes.length - 1])) coincidenciasFinal++;
+    if (nombresComunes.has(partes[0])) coincidenciasInicio++;
+  });
+  if (total < 5) return false;
+  const ratioFinal = coincidenciasFinal / total;
+  const ratioInicio = coincidenciasInicio / total;
+  return ratioFinal >= 0.55 && ratioFinal > ratioInicio + 0.15;
 }
 function buildLayout(nodes, compactSet, autoGroups) {
   compactSet = compactSet || /* @__PURE__ */ new Set();
@@ -451,7 +597,17 @@ function App() {
     }).filter(Boolean);
     if (impMode === "initial") {
       suppressDirty.current = 1;
-      setRoster(newRoster);
+      let rosterFinal = newRoster;
+      if (detectarFormatoApellidosPrimero(newRoster)) {
+        if (confirm(`Detect\xE9 que los nombres est\xE1n en formato APELLIDOS NOMBRES (ejemplo: "${newRoster.find((r) => r.nombre)?.nombre || "..."}").
+
+\xBFQuieres invertirlos al formato NOMBRES APELLIDOS autom\xE1ticamente?
+
+(Puedes hacerlo despu\xE9s manualmente con el bot\xF3n "Reordenar nombres")`)) {
+          rosterFinal = newRoster.map((r) => ({ ...r, nombre: invertirNombre(r.nombre) }));
+        }
+      }
+      setRoster(rosterFinal);
       setNodes([]);
       setSel(null);
       setImpRows([]);
@@ -1075,7 +1231,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
       /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.cargo || "", r.area ? " \xB7 " + r.area : "", r.dept ? " \xB7 " + r.dept : "")),
       /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, color: "#22C55E", fontWeight: 700 } }, "\uFF0B")
     ))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 18px", borderTop: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F8FAFC" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#64748B" } }, "Lista actual: ", grupo.members.length, " personas"), /* @__PURE__ */ React.createElement("button", { onClick: cerrarYAplicar, style: { padding: "6px 14px", borderRadius: 8, border: "1px solid #CBD5E1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 } }, addToListExtraBosses.length > 0 ? `\u2713 Aplicar y cerrar` : "Cerrar"))));
-  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "2px 6px", borderRadius: 6 } }, "v12"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
+  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "2px 6px", borderRadius: 6 } }, "v12.1"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
     setRosterQ("");
     setAddTab("persona");
     setPanel("add");
@@ -1084,7 +1240,18 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
     if (!f) return;
     if (f.name.endsWith(".json")) importJSON(e);
     else readFile(e);
-  } }), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => memRef.current?.click(), title: "Cargar memoria portable (.orgmem)" }, "\u{1F4C2} Cargar memoria"), /* @__PURE__ */ React.createElement("input", { ref: memRef, type: "file", accept: ".orgmem,.json", style: { display: "none" }, onChange: loadMem }), /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: saveMem, disabled: roster.length === 0 && nodes.length === 0, title: "Descargar todo el trabajo como archivo portable" }, "\u{1F4BE} Guardar memoria"), nodes.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: exportJSON }, "Exportar JSON"), /* @__PURE__ */ React.createElement("button", { className: "btn o", onClick: exportPDF, disabled: pdfLoading }, pdfLoading ? "Generando\u2026" : "Descargar PDF")), nodes.length > 0 && /* @__PURE__ */ React.createElement("div", { title: "Tipo de l\xEDnea de conexi\xF3n", style: { display: "flex", alignItems: "center", gap: 4, padding: "3px 4px", background: "#F1F5F9", borderRadius: 8, border: "1px solid #E2E8F0" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#64748B", padding: "0 4px", fontWeight: 600 } }, "L\xEDneas:"), /* @__PURE__ */ React.createElement(
+  } }), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => memRef.current?.click(), title: "Cargar memoria portable (.orgmem)" }, "\u{1F4C2} Cargar memoria"), /* @__PURE__ */ React.createElement("input", { ref: memRef, type: "file", accept: ".orgmem,.json", style: { display: "none" }, onChange: loadMem }), /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: saveMem, disabled: roster.length === 0 && nodes.length === 0, title: "Descargar todo el trabajo como archivo portable" }, "\u{1F4BE} Guardar memoria"), nodes.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: exportJSON }, "Exportar JSON"), /* @__PURE__ */ React.createElement("button", { className: "btn o", onClick: exportPDF, disabled: pdfLoading }, pdfLoading ? "Generando\u2026" : "Descargar PDF")), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => {
+    const total = roster.length + nodes.filter((n) => n.tipo === "persona").length;
+    if (!confirm(`\xBFInvertir todos los nombres del formato actual (APELLIDOS NOMBRES) a NOMBRES APELLIDOS?
+
+Esto afectar\xE1 ${total} personas (roster + chart).
+
+Ejemplo: "SANCHEZ OSORNO OSCAR" \u2192 "OSCAR SANCHEZ OSORNO"
+
+Si te equivocas, vuelve a darle clic para invertir de nuevo.`)) return;
+    setRoster((r) => r.map((x) => ({ ...x, nombre: invertirNombre(x.nombre) })));
+    setNodes((p) => p.map((n) => n.tipo === "persona" ? { ...n, nombre: invertirNombre(n.nombre) } : n));
+  }, title: "Invertir orden: APELLIDOS NOMBRES \u2194 NOMBRES APELLIDOS" }, "\u21C4 Reordenar nombres"), nodes.length > 0 && /* @__PURE__ */ React.createElement("div", { title: "Tipo de l\xEDnea de conexi\xF3n", style: { display: "flex", alignItems: "center", gap: 4, padding: "3px 4px", background: "#F1F5F9", borderRadius: 8, border: "1px solid #E2E8F0" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "#64748B", padding: "0 4px", fontWeight: 600 } }, "L\xEDneas:"), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => setLineStyle("curved"),
@@ -1492,7 +1659,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
             overflow: "hidden",
             position: "relative",
             cursor: modoAsignar ? "crosshair" : "pointer"
-          } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: c.border } }), esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 12, left: 12, width: 22, height: 22, borderRadius: "50%", background: "#22C55E", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, zIndex: 5, boxShadow: "0 2px 6px rgba(34,197,94,.4)" } }, "\u2713"), tieneMultiplesJefes && !modoAsignar && !esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { title: `${parentsList.length} jefes`, style: { position: "absolute", top: 12, left: 12, padding: "2px 7px", borderRadius: 10, background: "#F3E8FF", color: "#7E22CE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, zIndex: 5, border: "1px solid #D8B4FE" } }, parentsList.length, "\u2687"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16, width: FOTO_SZ, height: FOTO_SZ, borderRadius: "50%", background: c.bg, border: `3px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.08)" } }, n.foto ? /* @__PURE__ */ React.createElement("img", { src: n.foto, style: { width: "100%", height: "100%", objectFit: "cover" }, alt: n.nombre }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 26, fontWeight: 700, color: c.text, letterSpacing: "-0.02em" } }, ini(n.nombre))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.nombre, 22)), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 3, padding: "0 10px", width: "100%", textAlign: "center", fontSize: 10, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 } }, trunc(n.cargo, 26)), badgeVal && !badgeRedundant && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 5, background: c.bg, borderRadius: 4, padding: "2px 8px", maxWidth: "calc(100% - 16px)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: c.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "100%" } }, trunc(n.area || n.dept, 22))), esAncestroCompacto && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 8, left: 8, fontSize: 8, fontWeight: 700, color: "#0F766E", background: "#CCFBF1", padding: "1px 6px", borderRadius: 8, letterSpacing: "0.03em" } }, "HIJOS EN LISTA"), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { title: "Editar", onClick: (e) => {
+          } }, /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: c.border } }), esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 12, left: 12, width: 22, height: 22, borderRadius: "50%", background: "#22C55E", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, zIndex: 5, boxShadow: "0 2px 6px rgba(34,197,94,.4)" } }, "\u2713"), tieneMultiplesJefes && !modoAsignar && !esJefeActualDelOrigen && /* @__PURE__ */ React.createElement("div", { title: `${parentsList.length} jefes`, style: { position: "absolute", top: 12, left: 12, padding: "2px 7px", borderRadius: 10, background: "#F3E8FF", color: "#7E22CE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, zIndex: 5, border: "1px solid #D8B4FE" } }, parentsList.length, "\u2687"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16, width: FOTO_SZ, height: FOTO_SZ, borderRadius: "50%", background: c.bg, border: `3px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.08)" } }, n.foto ? /* @__PURE__ */ React.createElement("img", { src: n.foto, style: { width: "100%", height: "100%", objectFit: "cover" }, alt: n.nombre }) : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 26, fontWeight: 700, color: c.text, letterSpacing: "-0.02em" } }, ini(n.nombre))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, padding: "0 8px", width: "100%", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" } }, n.nombre), n.cargo && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 2, padding: "0 8px", width: "100%", textAlign: "center", fontSize: 10, color: "#64748B", lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" } }, n.cargo), badgeVal && !badgeRedundant && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 5, background: c.bg, borderRadius: 4, padding: "2px 8px", maxWidth: "calc(100% - 16px)" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 9, color: c.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "100%" } }, trunc(n.area || n.dept, 22))), esAncestroCompacto && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", bottom: 8, left: 8, fontSize: 8, fontWeight: 700, color: "#0F766E", background: "#CCFBF1", padding: "1px 6px", borderRadius: 8, letterSpacing: "0.03em" } }, "HIJOS EN LISTA"), isSel && !modoAsignar && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { title: "Editar", onClick: (e) => {
             e.stopPropagation();
             openEdit(n);
           }, style: { width: 26, height: 26, borderRadius: 7, background: c.bg, border: `1px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" } }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 16 16", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M11 2l3 3-9 9H2v-3L11 2z", stroke: c.text, strokeWidth: "1.5", strokeLinejoin: "round" }))), /* @__PURE__ */ React.createElement("div", { title: "Asignar jefe (clic en otro nodo)", onClick: (e) => {
