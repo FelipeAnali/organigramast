@@ -6,8 +6,8 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
     <meta http-equiv="Pragma" content="no-cache"/>
     <meta http-equiv="Expires" content="0"/>
-    <meta name="version" content="v12.2-7d9b67a9"/>
-    <title>Organigrama Cañaveral v12.2</title>
+    <meta name="version" content="v12.3-20395b8f"/>
+    <title>Organigrama Cañaveral v12.3</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
       #root { height: 100%; }
@@ -20,8 +20,8 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   </head>
   <body>
-    <div id="root"><div id="loading">Cargando organigrama v12.2…</div></div>
-    <!-- build: 7d9b67a9 / ts: 1777407169 -->
+    <div id="root"><div id="loading">Cargando organigrama v12.3…</div></div>
+    <!-- build: 20395b8f / ts: 1777407758 -->
     <script>
       const { useState, useMemo, useRef, useCallback, useEffect } = React;
 const PAL = [
@@ -683,6 +683,11 @@ function App() {
   };
   const addPersona = (r) => {
     if (inChart.has(r.id)) return;
+    if (r.retirado) {
+      if (!confirm(`\u26A0\uFE0F ${r.nombre} est\xE1 marcado como RETIRADO en el roster.
+
+\xBFAgregarlo al chart de todos modos?`)) return;
+    }
     if (nodes.length === 0) {
       setNodes((p) => [...p, { ...r, parentId: "", tipo: "persona" }]);
       return;
@@ -775,7 +780,7 @@ function App() {
   const bossResults = useMemo(() => {
     if (!bossQ.trim()) return [];
     const q = bossQ.toLowerCase();
-    const fromRoster = roster.filter((r) => r.id !== editId && [r.nombre, r.cargo, r.area].some((v) => (v || "").toLowerCase().includes(q))).slice(0, 20).map((r) => ({ ...r, enChart: inChart.has(r.id) }));
+    const fromRoster = roster.filter((r) => !r.retirado && r.id !== editId && [r.nombre, r.cargo, r.area].some((v) => (v || "").toLowerCase().includes(q))).slice(0, 20).map((r) => ({ ...r, enChart: inChart.has(r.id) }));
     const fromGroups = nodes.filter((n) => n.tipo === "grupo" && n.id !== editId && (n.nombre || "").toLowerCase().includes(q)).map((n) => ({ ...n, enChart: true, cargo: "Grupo / Sede" }));
     return [...fromGroups, ...fromRoster].slice(0, 25);
   }, [bossQ, roster, nodes, editId, inChart]);
@@ -1140,6 +1145,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
     const q = addToListQ.trim().toLowerCase();
     const yaEnChart = new Set(nodes.map((n) => n.id));
     const filtrados = roster.filter((r) => {
+      if (r.retirado) return false;
       if (yaEnChart.has(r.id)) return false;
       if (addToListFilters.sede.length && !addToListFilters.sede.includes(r.area)) return false;
       if (addToListFilters.cargo.length && !addToListFilters.cargo.includes(r.cargo)) return false;
@@ -1231,7 +1237,7 @@ ${mem.roster?.length || 0} en roster \xB7 ${mem.nodes?.length || 0} en chart`);
       /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.cargo || "", r.area ? " \xB7 " + r.area : "", r.dept ? " \xB7 " + r.dept : "")),
       /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, color: "#22C55E", fontWeight: 700 } }, "\uFF0B")
     ))), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 18px", borderTop: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F8FAFC" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#64748B" } }, "Lista actual: ", grupo.members.length, " personas"), /* @__PURE__ */ React.createElement("button", { onClick: cerrarYAplicar, style: { padding: "6px 14px", borderRadius: 8, border: "1px solid #CBD5E1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 } }, addToListExtraBosses.length > 0 ? `\u2713 Aplicar y cerrar` : "Cerrar"))));
-  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "2px 6px", borderRadius: 6 } }, "v12.2"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
+  })(), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "#fff", borderBottom: "1px solid #E2E8F0", flexShrink: 0, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "8", y: "2", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "2", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "15", width: "8", height: "7", rx: "1.5", stroke: "#3B82F6", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v3M6 15v-3h12v3", stroke: "#3B82F6", strokeWidth: "1.5", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 700, fontSize: 15, color: "#0F172A" } }, "Organigrama"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "2px 6px", borderRadius: 6 } }, "v12.3"), dirty && /* @__PURE__ */ React.createElement("span", { title: "Cambios sin guardar", style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#C2410C", fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { className: "dot-unsaved" }), "sin guardar"), !dirty && memFileName && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#15803D", fontWeight: 600 }, title: memFileName }, "\u2713 guardado"), roster.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#F0FDF4", color: "#15803D", borderRadius: 20, fontWeight: 600 } }, roster.length, " en roster"), nodes.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", background: "#EFF6FF", color: "#1E40AF", borderRadius: 20, fontWeight: 600 } }, nodes.length, " en chart"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (roster.length > 0 || nodes.length > 0) && /* @__PURE__ */ React.createElement("button", { className: "btn g", onClick: () => {
     setRosterQ("");
     setAddTab("persona");
     setPanel("add");
@@ -1328,9 +1334,10 @@ Si te equivocas, vuelve a darle clic para invertir de nuevo.`)) return;
     );
   })), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#0369A1", marginBottom: 8, lineHeight: 1.5 } }, "\u{1F4A1} Clic en cada jefe para agregarlo/quitarlo. Puedes elegir varios."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { className: "btn p", onClick: confirmQuickAdd, style: { flex: 1, fontSize: 12 } }, quickAdd.parentIds?.length > 0 ? `\u2713 Agregar con ${quickAdd.parentIds.length} jefe${quickAdd.parentIds.length !== 1 ? "s" : ""}` : "\u2713 Agregar al chart (sin jefe)")))), !quickAdd && rosterFiltered.map((r) => {
     const ya = inChart.has(r.id);
+    const ret = r.retirado;
     return /* @__PURE__ */ React.createElement("div", { key: r.id, className: `rrow${ya ? " added" : ""}`, onClick: () => {
       if (!ya) addPersona(r);
-    } }, /* @__PURE__ */ React.createElement("div", { style: { width: 32, height: 32, borderRadius: "50%", background: ya ? "#EDE9FE" : "#F1F5F9", border: `1.5px solid ${ya ? "#A855F7" : "#E2E8F0"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: ya ? "#7E22CE" : "#64748B" } }, ini(r.nombre))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, [r.cargo, r.area].filter(Boolean).join(" \xB7 "))), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 7px", borderRadius: 6, background: ya ? "#EDE9FE" : "#EFF6FF", color: ya ? "#7E22CE" : "#3B82F6", fontWeight: 600, flexShrink: 0 } }, ya ? "En chart" : "+ Agregar"));
+    }, style: ret ? { opacity: 0.55, background: "#FEF3C7" } : void 0 }, /* @__PURE__ */ React.createElement("div", { style: { width: 32, height: 32, borderRadius: "50%", background: ret ? "#FEF3C7" : ya ? "#EDE9FE" : "#F1F5F9", border: `1.5px solid ${ret ? "#F59E0B" : ya ? "#A855F7" : "#E2E8F0"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, position: "relative" } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: ret ? "#92400E" : ya ? "#7E22CE" : "#64748B" } }, ini(r.nombre)), ret && /* @__PURE__ */ React.createElement("span", { style: { position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: "50%", background: "#F59E0B", color: "#fff", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, border: "1.5px solid #fff" } }, "!")), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: ret ? "line-through" : "none" } }, r.nombre), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: "#64748B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, ret && /* @__PURE__ */ React.createElement("span", { style: { color: "#F59E0B", fontWeight: 700, marginRight: 4 } }, "\u26A0 RETIRADO"), [r.cargo, r.area].filter(Boolean).join(" \xB7 "))), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, padding: "2px 7px", borderRadius: 6, background: ret ? "#FEF3C7" : ya ? "#EDE9FE" : "#EFF6FF", color: ret ? "#92400E" : ya ? "#7E22CE" : "#3B82F6", fontWeight: 600, flexShrink: 0 } }, ret ? "Retirado" : ya ? "En chart" : "+ Agregar"));
   }), !quickAdd && rosterFiltered.length === 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "24px 14px", textAlign: "center", fontSize: 13, color: "#94A3B8" } }, roster.length === 0 ? "Importa un xlsx primero" : "Sin resultados")), /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px", borderTop: "1px solid #E2E8F0", fontSize: 11, color: "#64748B", lineHeight: 1.7, flexShrink: 0 } }, quickAdd ? "Selecciona a qui\xE9n reporta o haz clic en \xABSin jefe\xBB para agregarlo como ra\xEDz." : "Clic en una persona \u2192 asigna su conexi\xF3n al instante.")), addTab === "grupo" && /* @__PURE__ */ React.createElement("div", { style: { padding: "0 14px 14px", overflowY: "auto", flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 12px", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 10, marginBottom: 14, fontSize: 12, color: "#C2410C", lineHeight: 1.7 } }, "Los ", /* @__PURE__ */ React.createElement("strong", null, "grupos"), " son nodos intermedios para sedes, \xE1reas o departamentos \u2014 no son personas del roster."), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 12 } }, /* @__PURE__ */ React.createElement("label", { style: { display: "block", fontSize: 12, color: "#64748B", marginBottom: 4 } }, "Origen del nombre"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, [{ v: "manual", l: "\u270F\uFE0F Manual" }, { v: "columna", l: "\u{1F4CB} Desde maestro" }].map((o) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -1393,7 +1400,71 @@ Si te equivocas, vuelve a darle clic para invertir de nuevo.`)) return;
     setPanel(null);
     setSel(null);
     setEditId(null);
-  } }, "Cancelar")), /* @__PURE__ */ React.createElement("button", { className: "btn d", onClick: () => delNode(editNode.id), style: { width: "100%", marginTop: 8 } }, "Eliminar del chart")), /* @__PURE__ */ React.createElement(
+  } }, "Cancelar")), /* @__PURE__ */ React.createElement("button", { className: "btn d", onClick: () => delNode(editNode.id), style: { width: "100%", marginTop: 8 } }, "Eliminar del chart"), editNode.tipo === "persona" && (() => {
+    const enRoster = roster.find((r) => r.id === editNode.id);
+    const yaRetirado = enRoster?.retirado;
+    const enChart = nodes.some((n) => n.id === editNode.id);
+    const marcarRetirado = () => {
+      const accion = yaRetirado ? "REACTIVAR" : "marcar como RETIRADO";
+      if (!confirm(`\xBF${accion} a ${editNode.nombre} en el roster?
+
+${yaRetirado ? "Volver\xE1 a aparecer en b\xFAsquedas para agregar al chart." : "Ya no aparecer\xE1 al buscar para agregar al chart, pero se conserva en el roster con marca \u26A0\uFE0F."}`)) return;
+      if (!yaRetirado && enChart) {
+        if (confirm(`Esta persona est\xE1 en el chart actualmente. \xBFTambi\xE9n quitarla del chart?`)) {
+          delNode(editNode.id);
+        }
+      }
+      setRoster((r) => r.map((x) => x.id === editNode.id ? { ...x, retirado: !yaRetirado } : x));
+      if (!yaRetirado) {
+        setPanel(null);
+        setSel(null);
+        setEditId(null);
+      }
+    };
+    const eliminarDefinitivo = () => {
+      if (!confirm(`\u26A0\uFE0F ELIMINAR DEFINITIVO a ${editNode.nombre} del roster maestro.
+
+Esta acci\xF3n NO se puede deshacer (a menos que recargues el maestro).
+
+Si solo quieres marcarlo como retirado pero conservar el registro, usa el bot\xF3n naranja "Marcar como retirado".
+
+\xBFContinuar?`)) return;
+      if (enChart) {
+        if (!confirm(`Esta persona tambi\xE9n est\xE1 en el chart. Se eliminar\xE1 de ambos sitios. \xBFConfirmar?`)) return;
+        setNodes((p) => p.filter((n) => n.id !== editNode.id).map((n) => {
+          const ps = parentsOf(n);
+          if (!ps.includes(editNode.id)) return n;
+          const next = ps.filter((x) => x !== editNode.id);
+          const upd = { ...n };
+          delete upd.parentId;
+          delete upd.parentIds;
+          if (next.length === 0) upd.parentId = "";
+          else if (next.length === 1) upd.parentId = next[0];
+          else upd.parentIds = next;
+          return upd;
+        }));
+      }
+      setRoster((r) => r.filter((x) => x.id !== editNode.id));
+      setPanel(null);
+      setSel(null);
+      setEditId(null);
+    };
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { marginTop: 14, paddingTop: 10, borderTop: "1px solid #E2E8F0", fontSize: 11, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.05em" } }, "GESTI\xD3N EN EL ROSTER"), yaRetirado && /* @__PURE__ */ React.createElement("div", { style: { margin: "8px 0", padding: "6px 10px", background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 6, fontSize: 11, color: "#78350F" } }, "\u26A0\uFE0F Esta persona est\xE1 marcada como ", /* @__PURE__ */ React.createElement("strong", null, "RETIRADA")), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: marcarRetirado,
+        style: { width: "100%", marginTop: 6, padding: "7px 10px", borderRadius: 8, border: `1px solid ${yaRetirado ? "#22C55E" : "#F59E0B"}`, background: yaRetirado ? "#F0FDF4" : "#FFFBEB", color: yaRetirado ? "#15803D" : "#92400E", cursor: "pointer", fontSize: 12, fontWeight: 600 }
+      },
+      yaRetirado ? "\u21BB Reactivar (quitar marca de retirado)" : "\u26A0\uFE0F Marcar como retirado"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: eliminarDefinitivo,
+        style: { width: "100%", marginTop: 6, padding: "7px 10px", borderRadius: 8, border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#B91C1C", cursor: "pointer", fontSize: 12, fontWeight: 600 }
+      },
+      "\u{1F5D1} Eliminar del roster definitivo"
+    ), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#94A3B8", marginTop: 6, lineHeight: 1.4 } }, "\u{1F4A1} ", /* @__PURE__ */ React.createElement("strong", null, "Marcar como retirado"), " conserva el registro pero lo oculta en b\xFAsquedas.", /* @__PURE__ */ React.createElement("strong", null, " Eliminar definitivo"), " lo borra del roster (se puede recuperar al recargar maestro)."));
+  })()), /* @__PURE__ */ React.createElement(
     "div",
     {
       ref: canvasRef,

@@ -601,6 +601,9 @@ export default function App(){
   /* ── Agregar persona al chart ── */
   const addPersona=r=>{
     if(inChart.has(r.id))return;
+    if(r.retirado){
+      if(!confirm(`⚠️ ${r.nombre} está marcado como RETIRADO en el roster.\n\n¿Agregarlo al chart de todos modos?`)) return;
+    }
     if(nodes.length===0){ setNodes(p=>[...p,{...r,parentId:"",tipo:"persona"}]); return; }
     setQuickAdd({person:r,parentIds:[],q:""});
   };
@@ -684,7 +687,7 @@ export default function App(){
   const bossResults=useMemo(()=>{
     if(!bossQ.trim()) return [];
     const q=bossQ.toLowerCase();
-    const fromRoster=roster.filter(r=>r.id!==editId&&[r.nombre,r.cargo,r.area].some(v=>(v||"").toLowerCase().includes(q))).slice(0,20).map(r=>({...r,enChart:inChart.has(r.id)}));
+    const fromRoster=roster.filter(r=>!r.retirado && r.id!==editId&&[r.nombre,r.cargo,r.area].some(v=>(v||"").toLowerCase().includes(q))).slice(0,20).map(r=>({...r,enChart:inChart.has(r.id)}));
     const fromGroups=nodes.filter(n=>n.tipo==="grupo"&&n.id!==editId&&(n.nombre||"").toLowerCase().includes(q)).map(n=>({...n,enChart:true,cargo:"Grupo / Sede"}));
     return [...fromGroups,...fromRoster].slice(0,25);
   },[bossQ,roster,nodes,editId,inChart]);
@@ -1110,6 +1113,7 @@ export default function App(){
 
         /* Candidatos: aplicar filtros + búsqueda */
         const filtrados = roster.filter(r=>{
+          if(r.retirado) return false; /* v12.3: ocultar retirados */
           if(yaEnChart.has(r.id)) return false;
           if(addToListFilters.sede.length && !addToListFilters.sede.includes(r.area)) return false;
           if(addToListFilters.cargo.length && !addToListFilters.cargo.includes(r.cargo)) return false;
@@ -1322,7 +1326,7 @@ export default function App(){
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"#fff",borderBottom:"1px solid #E2E8F0",flexShrink:0,flexWrap:"wrap"}}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="8" y="2" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="2" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><rect x="14" y="15" width="8" height="7" rx="1.5" stroke="#3B82F6" strokeWidth="1.5"/><path d="M12 9v3M6 15v-3h12v3" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round"/></svg>
         <span style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Organigrama</span>
-        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12.2</span>
+        <span style={{fontSize:10,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"2px 6px",borderRadius:6}}>v12.3</span>
         {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
         {!dirty && memFileName && <span style={{fontSize:11,color:"#15803D",fontWeight:600}} title={memFileName}>✓ guardado</span>}
         {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:"#F0FDF4",color:"#15803D",borderRadius:20,fontWeight:600}}>{roster.length} en roster</span>}
@@ -1558,16 +1562,21 @@ export default function App(){
                   {/* ── Lista de personas ── */}
                   {!quickAdd&&rosterFiltered.map(r=>{
                     const ya=inChart.has(r.id);
+                    const ret=r.retirado;
                     return(
-                      <div key={r.id} className={`rrow${ya?" added":""}`} onClick={()=>{if(!ya)addPersona(r);}}>
-                        <div style={{width:32,height:32,borderRadius:"50%",background:ya?"#EDE9FE":"#F1F5F9",border:`1.5px solid ${ya?"#A855F7":"#E2E8F0"}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                          <span style={{fontSize:11,fontWeight:700,color:ya?"#7E22CE":"#64748B"}}>{ini(r.nombre)}</span>
+                      <div key={r.id} className={`rrow${ya?" added":""}`} onClick={()=>{if(!ya)addPersona(r);}} style={ret?{opacity:0.55,background:"#FEF3C7"}:undefined}>
+                        <div style={{width:32,height:32,borderRadius:"50%",background:ret?"#FEF3C7":(ya?"#EDE9FE":"#F1F5F9"),border:`1.5px solid ${ret?"#F59E0B":(ya?"#A855F7":"#E2E8F0")}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,position:"relative"}}>
+                          <span style={{fontSize:11,fontWeight:700,color:ret?"#92400E":(ya?"#7E22CE":"#64748B")}}>{ini(r.nombre)}</span>
+                          {ret && <span style={{position:"absolute",top:-4,right:-4,width:14,height:14,borderRadius:"50%",background:"#F59E0B",color:"#fff",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,border:"1.5px solid #fff"}}>!</span>}
                         </div>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.nombre}</div>
-                          <div style={{fontSize:11,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{[r.cargo,r.area].filter(Boolean).join(" · ")}</div>
+                          <div style={{fontSize:13,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textDecoration:ret?"line-through":"none"}}>{r.nombre}</div>
+                          <div style={{fontSize:11,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            {ret && <span style={{color:"#F59E0B",fontWeight:700,marginRight:4}}>⚠ RETIRADO</span>}
+                            {[r.cargo,r.area].filter(Boolean).join(" · ")}
+                          </div>
                         </div>
-                        <span style={{fontSize:11,padding:"2px 7px",borderRadius:6,background:ya?"#EDE9FE":"#EFF6FF",color:ya?"#7E22CE":"#3B82F6",fontWeight:600,flexShrink:0}}>{ya?"En chart":"+ Agregar"}</span>
+                        <span style={{fontSize:11,padding:"2px 7px",borderRadius:6,background:ret?"#FEF3C7":(ya?"#EDE9FE":"#EFF6FF"),color:ret?"#92400E":(ya?"#7E22CE":"#3B82F6"),fontWeight:600,flexShrink:0}}>{ret?"Retirado":(ya?"En chart":"+ Agregar")}</span>
                       </div>);
                   })}
                   {!quickAdd&&rosterFiltered.length===0&&<div style={{padding:"24px 14px",textAlign:"center",fontSize:13,color:"#94A3B8"}}>
@@ -1814,6 +1823,70 @@ export default function App(){
               <button className="btn" onClick={()=>{setPanel(null);setSel(null);setEditId(null);}}>Cancelar</button>
             </div>
             <button className="btn d" onClick={()=>delNode(editNode.id)} style={{width:"100%",marginTop:8}}>Eliminar del chart</button>
+
+            {/* v12.3: botones de roster (solo personas, no grupos) */}
+            {editNode.tipo==="persona" && (()=>{
+              const enRoster = roster.find(r=>r.id===editNode.id);
+              const yaRetirado = enRoster?.retirado;
+              const enChart = nodes.some(n=>n.id===editNode.id);
+
+              const marcarRetirado=()=>{
+                const accion = yaRetirado ? "REACTIVAR" : "marcar como RETIRADO";
+                if(!confirm(`¿${accion} a ${editNode.nombre} en el roster?\n\n${yaRetirado?"Volverá a aparecer en búsquedas para agregar al chart.":"Ya no aparecerá al buscar para agregar al chart, pero se conserva en el roster con marca ⚠️."}`)) return;
+                if(!yaRetirado && enChart){
+                  if(confirm(`Esta persona está en el chart actualmente. ¿También quitarla del chart?`)){
+                    delNode(editNode.id);
+                  }
+                }
+                setRoster(r=>r.map(x=>x.id===editNode.id?{...x, retirado:!yaRetirado}:x));
+                if(!yaRetirado) { setPanel(null); setSel(null); setEditId(null); }
+              };
+
+              const eliminarDefinitivo=()=>{
+                if(!confirm(`⚠️ ELIMINAR DEFINITIVO a ${editNode.nombre} del roster maestro.\n\nEsta acción NO se puede deshacer (a menos que recargues el maestro).\n\nSi solo quieres marcarlo como retirado pero conservar el registro, usa el botón naranja "Marcar como retirado".\n\n¿Continuar?`)) return;
+                if(enChart){
+                  if(!confirm(`Esta persona también está en el chart. Se eliminará de ambos sitios. ¿Confirmar?`)) return;
+                  setNodes(p=>p.filter(n=>n.id!==editNode.id).map(n=>{
+                    const ps=parentsOf(n);
+                    if(!ps.includes(editNode.id)) return n;
+                    const next=ps.filter(x=>x!==editNode.id);
+                    const upd={...n};
+                    delete upd.parentId; delete upd.parentIds;
+                    if(next.length===0) upd.parentId="";
+                    else if(next.length===1) upd.parentId=next[0];
+                    else upd.parentIds=next;
+                    return upd;
+                  }));
+                }
+                setRoster(r=>r.filter(x=>x.id!==editNode.id));
+                setPanel(null); setSel(null); setEditId(null);
+              };
+
+              return(
+                <>
+                  <div style={{marginTop:14,paddingTop:10,borderTop:"1px solid #E2E8F0",fontSize:11,fontWeight:700,color:"#94A3B8",letterSpacing:"0.05em"}}>
+                    GESTIÓN EN EL ROSTER
+                  </div>
+                  {yaRetirado && (
+                    <div style={{margin:"8px 0",padding:"6px 10px",background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:6,fontSize:11,color:"#78350F"}}>
+                      ⚠️ Esta persona está marcada como <strong>RETIRADA</strong>
+                    </div>
+                  )}
+                  <button onClick={marcarRetirado}
+                    style={{width:"100%",marginTop:6,padding:"7px 10px",borderRadius:8,border:`1px solid ${yaRetirado?"#22C55E":"#F59E0B"}`,background:yaRetirado?"#F0FDF4":"#FFFBEB",color:yaRetirado?"#15803D":"#92400E",cursor:"pointer",fontSize:12,fontWeight:600}}>
+                    {yaRetirado ? "↻ Reactivar (quitar marca de retirado)" : "⚠️ Marcar como retirado"}
+                  </button>
+                  <button onClick={eliminarDefinitivo}
+                    style={{width:"100%",marginTop:6,padding:"7px 10px",borderRadius:8,border:"1px solid #FCA5A5",background:"#FEF2F2",color:"#B91C1C",cursor:"pointer",fontSize:12,fontWeight:600}}>
+                    🗑 Eliminar del roster definitivo
+                  </button>
+                  <div style={{fontSize:10,color:"#94A3B8",marginTop:6,lineHeight:1.4}}>
+                    💡 <strong>Marcar como retirado</strong> conserva el registro pero lo oculta en búsquedas.
+                    <strong> Eliminar definitivo</strong> lo borra del roster (se puede recuperar al recargar maestro).
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
 
