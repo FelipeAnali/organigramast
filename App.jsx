@@ -1069,7 +1069,7 @@ export default function App(){
 
       const canvas=await h2c(el,{
         scale:2,
-        backgroundColor:"#F8FAFC",
+        backgroundColor:"#FFFFFF",
         useCORS:true,
         allowTaint:false,
         logging:false,
@@ -1084,16 +1084,62 @@ export default function App(){
         scrollY:0,
       });
 
-      /* Validar que el canvas tiene contenido (no todo blanco) */
       if(canvas.width<10||canvas.height<10){
         throw new Error(`Canvas vacío (${canvas.width}x${canvas.height}). Recarga la página y vuelve a intentar.`);
       }
 
-      const imgData=canvas.toDataURL("image/png");
-      const w2=canvas.width/2, h2=canvas.height/2;
-      const pdf=new jsPDF({orientation: w2>h2?"landscape":"portrait",unit:"px",format:[w2,h2]});
-      pdf.addImage(imgData,"PNG",0,0,w2,h2);
-      pdf.save(`organigrama_${new Date().toISOString().slice(0,10)}.pdf`);
+      /* v14.4: PDF con header corporativo (logo + nombre) en esquina superior izquierda */
+      const HEADER_H = 70;
+      const PAGE_PAD = 20;
+      const chartW = canvas.width/2;
+      const chartH = canvas.height/2;
+
+      const pageW = chartW + PAGE_PAD*2;
+      const pageH = chartH + HEADER_H + PAGE_PAD*2;
+
+      const pdf = new jsPDF({
+        orientation: pageW > pageH ? "landscape" : "portrait",
+        unit: "px",
+        format: [pageW, pageH],
+      });
+
+      /* Línea de acento verde lima debajo del header */
+      pdf.setFillColor(125, 209, 5);  /* #7DD105 */
+      pdf.rect(0, HEADER_H - 3, pageW, 3, "F");
+
+      /* Logo de la caña */
+      const logoH = 50;
+      const logoW = Math.round(logoH * 130/256);
+      try {
+        pdf.addImage(CANA_IMG, "PNG", PAGE_PAD, (HEADER_H - logoH)/2, logoW, logoH);
+      } catch(e) { console.warn("logo error:", e); }
+
+      /* Texto "Supertiendas" + "Cañaveral" */
+      const textX = PAGE_PAD + logoW + 10;
+      const textCenterY = HEADER_H/2;
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(11);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text("Supertiendas", textX, textCenterY - 4);
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(22);
+      pdf.setTextColor(28, 90, 42);  /* #1C5A2A */
+      pdf.text("Cañaveral", textX, textCenterY + 16);
+
+      /* Fecha en esquina derecha del header */
+      const fecha = new Date().toLocaleDateString("es-CO", {year:"numeric", month:"long", day:"numeric"});
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9);
+      pdf.setTextColor(148, 163, 184);
+      pdf.text("Organigrama · "+fecha, pageW - PAGE_PAD, HEADER_H/2 + 2, {align: "right"});
+
+      /* Insertar el chart debajo del header */
+      const imgData = canvas.toDataURL("image/png");
+      pdf.addImage(imgData, "PNG", PAGE_PAD, HEADER_H + PAGE_PAD/2, chartW, chartH);
+
+      pdf.save(`organigrama_canaveral_${new Date().toISOString().slice(0,10)}.pdf`);
     }catch(err){console.error("PDF error:",err);alert("Error al generar PDF: "+err.message+"\n\nPrueba a recargar la página y reintentar.");}
     /* Restaurar SIEMPRE */
     Object.entries(prevStyle).forEach(([k,v])=>{ el.style[k]=v||""; });
@@ -1543,7 +1589,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v14.3</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v14.4</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
