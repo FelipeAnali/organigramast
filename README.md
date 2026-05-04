@@ -1,20 +1,26 @@
-# Organigramast v14.5 — Logo oficial en PDF
+# Organigramast v14.6 — Logo circular oficial en PDF
 
 ## Cambio
-El PDF descargado ahora usa el **logotipo oficial completo** de Cañaveral
-en la esquina superior izquierda (caña + texto "Supertiendas Cañaveral" integrados como una sola imagen).
+El PDF descargado ahora usa la **versión negativo circular** del logo Cañaveral
+(caña + texto blanco sobre círculo verde corporativo) — el que el manual de
+identidad define como "Versión Principal Negativo".
 
-Antes (v14.4): caña + texto helvetica armados por separado.
-Ahora (v14.5): el logo oficial tal cual lo enviaste, respetando tipografía, espaciado y proporciones reales.
+### Lo que se procesó
+- Recortado el círculo verde con máscara para fondo transparente fuera del logo
+- Optimizado a 280x280px (~38KB)
+- Embebido como base64 en el HTML
 
 ### Layout del PDF
-- Header de 70px:
-  - Logo oficial Cañaveral (esquina superior izquierda, ~50px de alto)
-  - Fecha de generación a la derecha
-  - Línea verde lima (#7DD105) de acento debajo del header
+- Header de **90px** (más alto que antes para acomodar bien el logo circular)
+- Logo de 70x70px en la esquina superior izquierda (circular, fondo verde corporativo)
+- Fecha de generación a la derecha
+- Línea verde lima (#7DD105) cruzando bajo el header
 - Organigrama debajo con padding
 
-## Etiqueta visible: **v14.5**
+El logo se ve más institucional y corporativo: el círculo verde con la caña +
+"Supertiendas Cañaveral" en blanco refuerza la marca de forma elegante en cada PDF descargado.
+
+## Etiqueta visible: **v14.6**
 
 ## Archivos
 - `index.html`, `App.jsx`
