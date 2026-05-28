@@ -398,6 +398,13 @@ export default function App(){
   const [panel,   setPanel]   = useState(null);
   /* v12: tipo de línea de conexión global */
   const [lineStyle, setLineStyle] = useState("curved"); // 'curved' | 'orthogonal' | 'straight'
+
+  /* v15: filtro por sedes. Estado unificado:
+     - sedes: array de IDs de grupos/sedes seleccionadas (vacío = ver todo)
+     - showBosses: incluir jefes (ancestros) arriba de las sedes filtradas
+     - showSubs: incluir subordinados (descendientes) de las sedes filtradas */
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [viewFilter, setViewFilter] = useState({sedes:[], showBosses:true, showSubs:true});
   const [sel,     setSel]     = useState(null);
   const [addTab,  setAddTab]  = useState("persona"); // "persona"|"grupo"
 
@@ -487,6 +494,11 @@ export default function App(){
     return()=>window.removeEventListener("beforeunload",h);
   },[dirty]);
 
+  /* v15: cuando cambia el filtro de sedes, resetear el viewport para que el contenido visible quede centrado */
+  useEffect(()=>{
+    setVp({x:0,y:0,s:1});
+  },[viewFilter.sedes.length, viewFilter.showBosses, viewFilter.showSubs]);
+
   const canvasRef  = useRef(null);
   const chartRef   = useRef(null);
   const fileRef    = useRef(null);
@@ -561,7 +573,54 @@ export default function App(){
     return s;
   },[autoGroups]);
 
-  const {pos,W,H}=useMemo(()=>buildLayout(nodes,compactSet,autoGroups),[nodes,compactSet,autoGroups]);
+  /* v15: nodos visibles según el filtro de sedes */
+  const visibleNodes = useMemo(()=>{
+    const sel = viewFilter.sedes || [];
+    if(sel.length===0) return nodes; /* sin filtro: ver todos */
+
+    const byId = Object.fromEntries(nodes.map(n=>[n.id,n]));
+    /* hijos de cada nodo */
+    const childrenOf = {};
+    nodes.forEach(n=>{
+      parentsOf(n).forEach(pid=>{
+        (childrenOf[pid] = childrenOf[pid] || []).push(n.id);
+      });
+    });
+
+    const keep = new Set();
+
+    /* 1. Las sedes seleccionadas siempre */
+    sel.forEach(id=>keep.add(id));
+
+    /* 2. Subordinados (descendientes) de las sedes seleccionadas */
+    if(viewFilter.showSubs){
+      const stack = [...sel];
+      while(stack.length){
+        const cur = stack.pop();
+        (childrenOf[cur]||[]).forEach(cid=>{
+          if(!keep.has(cid)){ keep.add(cid); stack.push(cid); }
+        });
+      }
+    }
+
+    /* 3. Jefes superiores (ancestros) de las sedes seleccionadas */
+    if(viewFilter.showBosses){
+      const stack = [...sel];
+      const seen = new Set(sel);
+      while(stack.length){
+        const cur = stack.pop();
+        const node = byId[cur];
+        parentsOf(node).forEach(pid=>{
+          keep.add(pid);
+          if(!seen.has(pid)){ seen.add(pid); stack.push(pid); }
+        });
+      }
+    }
+
+    return nodes.filter(n=>keep.has(n.id));
+  },[nodes, viewFilter]);
+
+  const {pos,W,H}=useMemo(()=>buildLayout(visibleNodes,compactSet,autoGroups),[visibleNodes,compactSet,autoGroups]);
   const inChart=useMemo(()=>new Set(nodes.map(n=>n.id)),[nodes]);
 
   const rosterFiltered=useMemo(()=>{
@@ -1579,7 +1638,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v14.6</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v15</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -1601,6 +1660,17 @@ export default function App(){
             setRoster(r=>r.map(x=>({...x, nombre: invertirNombre(x.nombre)})));
             setNodes(p=>p.map(n=>n.tipo==="persona" ? {...n, nombre: invertirNombre(n.nombre)} : n));
           }} title="Invertir orden: APELLIDOS NOMBRES ↔ NOMBRES APELLIDOS">⇄ Reordenar nombres</button>
+        )}
+        {/* v15: botón de filtro por sedes */}
+        {nodes.length>0 && nodes.some(n=>n.tipo==="grupo") && (
+          <button onClick={()=>setFilterOpen(o=>!o)}
+            title="Filtrar el organigrama por sedes específicas"
+            style={{padding:"5px 11px",borderRadius:8,border:`1px solid ${viewFilter.sedes.length>0?BRAND.primary:"#CBD5E1"}`,background:viewFilter.sedes.length>0?BRAND.primary:"#fff",color:viewFilter.sedes.length>0?"#fff":"#334155",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5,fontFamily:"inherit"}}>
+            🔍 Filtrar sedes
+            {viewFilter.sedes.length>0 && (
+              <span style={{background:BRAND.accent,color:BRAND.primaryDark,fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,lineHeight:1}}>{viewFilter.sedes.length}</span>
+            )}
+          </button>
         )}
         {/* v12: selector de tipo de línea */}
         {nodes.length>0 && (
@@ -2192,6 +2262,87 @@ export default function App(){
           }}
           onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}
           onClick={e=>{if(!e.target.closest(".on"))setSel(null);}}>
+
+          {/* v15: Panel de filtro por sedes (overlay flotante) */}
+          {filterOpen && (
+            <div onClick={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()}
+              style={{position:"absolute",top:12,right:12,zIndex:50,background:"#fff",borderRadius:12,boxShadow:"0 8px 30px rgba(15,58,24,.22)",border:`2px solid ${BRAND.primary}33`,width:300,maxHeight:"calc(100% - 24px)",display:"flex",flexDirection:"column",overflow:"hidden",fontFamily:"inherit"}}>
+              <div style={{padding:"10px 14px",background:BRAND.primary,color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:7}}>
+                  <span style={{fontSize:14}}>🔍</span>
+                  <span style={{fontWeight:700,fontSize:13}}>Filtrar por sedes</span>
+                </div>
+                <button onClick={()=>setFilterOpen(false)} style={{background:"transparent",border:"none",color:"#fff",cursor:"pointer",fontSize:16,padding:0,lineHeight:1}}>×</button>
+              </div>
+
+              {/* Toggles de qué incluir */}
+              <div style={{padding:"10px 14px",borderBottom:`1px solid ${BRAND.primary}22`,background:BRAND.bgSoft}}>
+                <div style={{fontSize:10,fontWeight:700,color:BRAND.primaryDark,marginBottom:6,letterSpacing:"0.04em"}}>QUÉ MOSTRAR</div>
+                <label style={{display:"flex",alignItems:"center",gap:7,padding:"4px 0",cursor:"pointer",fontSize:12}}>
+                  <input type="checkbox" checked={viewFilter.showBosses}
+                    onChange={e=>setViewFilter(f=>({...f, showBosses:e.target.checked}))}
+                    style={{cursor:"pointer",accentColor:BRAND.primary}}/>
+                  <span>👑 Mostrar jefes arriba</span>
+                </label>
+                <label style={{display:"flex",alignItems:"center",gap:7,padding:"4px 0",cursor:"pointer",fontSize:12}}>
+                  <input type="checkbox" checked={viewFilter.showSubs}
+                    onChange={e=>setViewFilter(f=>({...f, showSubs:e.target.checked}))}
+                    style={{cursor:"pointer",accentColor:BRAND.primary}}/>
+                  <span>👥 Mostrar subordinados</span>
+                </label>
+                <div style={{fontSize:10,color:"#64748B",marginTop:4,lineHeight:1.3}}>
+                  Si desactivas ambos, solo verás las sedes seleccionadas.
+                </div>
+              </div>
+
+              {/* Lista de sedes con multi-select */}
+              <div style={{padding:"10px 14px 6px",flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:10,fontWeight:700,color:BRAND.primaryDark,letterSpacing:"0.04em"}}>SEDES</div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>{
+                    const allSedeIds=nodes.filter(n=>n.tipo==="grupo").map(n=>n.id);
+                    setViewFilter(f=>({...f, sedes:allSedeIds}));
+                  }} style={{fontSize:10,padding:"2px 6px",border:`1px solid ${BRAND.primary}55`,background:"#fff",color:BRAND.primary,borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Todas</button>
+                  <button onClick={()=>setViewFilter(f=>({...f, sedes:[]}))}
+                    style={{fontSize:10,padding:"2px 6px",border:`1px solid #CBD5E1`,background:"#fff",color:"#64748B",borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Ninguna</button>
+                </div>
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"0 14px 10px"}}>
+                {nodes.filter(n=>n.tipo==="grupo").sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).map(sede=>{
+                  const checked = viewFilter.sedes.includes(sede.id);
+                  return (
+                    <label key={sede.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 6px",cursor:"pointer",borderRadius:6,fontSize:12,background:checked?BRAND.accent+"22":"transparent"}}>
+                      <input type="checkbox" checked={checked}
+                        onChange={()=>{
+                          setViewFilter(f=>{
+                            const arr=f.sedes||[];
+                            return {...f, sedes: checked?arr.filter(x=>x!==sede.id):[...arr, sede.id]};
+                          });
+                        }}
+                        style={{cursor:"pointer",accentColor:BRAND.primary}}/>
+                      <span style={{fontWeight:checked?700:500,color:checked?BRAND.primaryDark:"#334155",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sede.nombre}</span>
+                    </label>
+                  );
+                })}
+                {nodes.filter(n=>n.tipo==="grupo").length===0 && (
+                  <div style={{padding:"12px 4px",fontSize:11,color:"#94A3B8",textAlign:"center"}}>No hay sedes en el chart</div>
+                )}
+              </div>
+
+              {/* Footer: botón aplicar y limpiar */}
+              <div style={{padding:"10px 14px",borderTop:`1px solid ${BRAND.primary}22`,background:"#F8FAFC",display:"flex",gap:6,alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+                <span style={{fontSize:11,color:BRAND.primaryDark,fontWeight:600}}>
+                  {viewFilter.sedes.length===0 ? "Sin filtro (todo visible)" : `${viewFilter.sedes.length} sede${viewFilter.sedes.length!==1?"s":""}`}
+                </span>
+                {viewFilter.sedes.length>0 && (
+                  <button onClick={()=>setViewFilter(f=>({...f, sedes:[]}))}
+                    style={{fontSize:11,padding:"4px 10px",border:`1px solid #FCA5A5`,background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                    Limpiar filtro
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {nodes.length===0?(
             <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
