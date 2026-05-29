@@ -79,14 +79,16 @@ function isGroupNode(n){
   return GROUP_TYPES.includes(n.tipo);
 }
 
-/* v16: configuración por tipo de grupo (tamaños progresivos + íconos + colores) */
+/* v16-v17.2: configuración por tipo de grupo con tamaños mejorados */
 const GROUP_CONFIG = {
   sector: {
     label: "Sector",
     icon: "🏛️",
-    height: 88,
-    fontSize: 16,
-    iconSize: 24,
+    height: 92,
+    width: 320,      /* mucho más ancho para dar presencia */
+    fontSize: 17,
+    iconSize: 26,
+    fontWeight: 900,
     pal: [
       { bg:"#0F3A18", border:"#082009", text:"#ffffff" },
       { bg:"#1C5A2A", border:"#0F3A18", text:"#ffffff" },
@@ -95,9 +97,11 @@ const GROUP_CONFIG = {
   cluster: {
     label: "Clúster",
     icon: "📦",
-    height: 72,
+    height: 76,
+    width: 250,      /* mediano */
     fontSize: 14,
-    iconSize: 19,
+    iconSize: 20,
+    fontWeight: 800,
     pal: [
       { bg:"#256B30", border:"#0F3A18", text:"#ffffff" },
       { bg:"#2D7A3E", border:"#1C5A2A", text:"#ffffff" },
@@ -105,11 +109,13 @@ const GROUP_CONFIG = {
   },
   grupo: {
     label: "Sede",
-    icon: "cana",  /* usa CanaIcon */
+    icon: "cana",
     height: 64,
+    width: 180,      /* lo de siempre */
     fontSize: 13,
-    iconSize: 16,
-    pal: null,  /* usa GPAL existente */
+    iconSize: 17,
+    fontWeight: 700,
+    pal: null,
   },
 };
 function groupCfg(n){
@@ -274,6 +280,8 @@ function buildLayout(nodes, compactSet, autoGroups){
   };
   const nodeWidth=id=>{
     if(isRepresentative(id)) return LW;
+    const n=byId[id];
+    if(n && isGroupNode(n)) return groupCfg(n).width;
     return NW;
   };
 
@@ -1753,7 +1761,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17.1</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17.2</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -2595,10 +2603,12 @@ export default function App(){
                 </g>
               </svg>
 
-              {nodes.map(n=>{
+              {/* v17.2: render usa visibleNodes (filtrados) en lugar de todos los nodes */}
+              {visibleNodes.map(n=>{
                 const p=pos[n.id]; if(!p)return null;
                 const isSel=sel===n.id;
-                const nh=n.tipo==="grupo"?NHG:NH;
+                /* v17.2: altura correcta según tipo de grupo (sector/cluster/sede) */
+                const nh = isGroupNode(n) ? groupCfg(n).height : NH;
                 const modoAsignar_g = assignBossFor && assignBossFor !== n.id;
 
                 /* v11: si es miembro NO representante de un auto-grupo, no se dibuja (está dentro de la caja) */
@@ -2694,8 +2704,12 @@ export default function App(){
                     const origen=nodes.find(x=>x.id===assignBossFor);
                     return origen && parentsOf(origen).includes(n.id);
                   })();
-                  /* v16: ancho mayor para sectores/clústers (más jerárquicos) */
-                  const groupW = n.tipo==="sector" ? NW+60 : n.tipo==="cluster" ? NW+30 : NW;
+                  /* v17.2: ancho del nodo según config del tipo */
+                  const groupW = cfg.width;
+                  const isSector = n.tipo==="sector";
+                  const isCluster = n.tipo==="cluster";
+                  const isSede = n.tipo==="grupo";
+
                   return(
                     <div key={n.id} className="on"
                       style={{left:vp.x+p.x*vp.s,top:vp.y+p.y*vp.s,width:groupW*vp.s,height:nh*vp.s}}
@@ -2703,28 +2717,62 @@ export default function App(){
                       <div style={{
                         width:groupW,height:nh,transform:`scale(${vp.s})`,transformOrigin:"top left",
                         background:esJefeActDelOrigen_g?"#15803D":(modoAsignar_g?"#FBBF24":g.bg),
-                        border:`2px solid ${esJefeActDelOrigen_g?"#14532D":(modoAsignar_g?"#D97706":g.border)}`,
-                        borderRadius:n.tipo==="sector"?14:12,
-                        boxShadow:isSel?"0 0 0 3px rgba(255,255,255,.5),0 4px 20px rgba(0,0,0,.2)":(n.tipo==="sector"?"0 4px 16px rgba(0,0,0,.18)":"0 2px 8px rgba(0,0,0,.15)"),
-                        display:"flex",alignItems:"center",justifyContent:"center",gap:n.tipo==="sector"?12:8,padding:n.tipo==="sector"?"0 20px":"0 14px",
+                        border:`${isSector?3:2}px solid ${esJefeActDelOrigen_g?"#14532D":(modoAsignar_g?"#D97706":(isSector?BRAND.accent:g.border))}`,
+                        borderRadius:isSector?16:isCluster?12:10,
+                        boxShadow: isSel
+                          ? "0 0 0 3px rgba(125,209,5,.5),0 8px 24px rgba(0,0,0,.25)"
+                          : (isSector ? "0 6px 20px rgba(15,58,24,.25)" : isCluster ? "0 3px 10px rgba(15,58,24,.18)" : "0 2px 8px rgba(0,0,0,.15)"),
+                        display:"flex",
+                        flexDirection: (isSector||isCluster) ? "column" : "row",
+                        alignItems:"center",
+                        justifyContent:"center",
+                        gap: (isSector||isCluster) ? 4 : 8,
+                        padding: isSector ? "10px 20px" : isCluster ? "8px 16px" : "0 14px",
                         cursor:modoAsignar_g?"crosshair":"pointer",
                         position:"relative",
                       }}>
-                        {/* Ícono según tipo */}
-                        {n.tipo==="grupo" ? (
-                          <CanaIcon size={cfg.iconSize} color={esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text)}/>
-                        ) : (
-                          <span style={{fontSize:cfg.iconSize, flexShrink:0, filter:"grayscale(0)"}}>{cfg.icon}</span>
+                        {/* Badge superior solo para sector/cluster, integrado dentro de la tarjeta */}
+                        {!isSede && (
+                          <div style={{
+                            display:"flex",alignItems:"center",gap:6,
+                            background:"rgba(125,209,5,0.18)",
+                            border:`1px solid ${BRAND.accent}66`,
+                            padding:"2px 10px",borderRadius:99,
+                            fontSize:9,fontWeight:800,
+                            color:BRAND.accent,
+                            letterSpacing:"0.1em",
+                            marginBottom:isSector?2:0,
+                          }}>
+                            <span style={{fontSize:11}}>{cfg.icon}</span>
+                            <span>{cfg.label.toUpperCase()}</span>
+                          </div>
                         )}
-                        <span style={{fontSize:cfg.fontSize,fontWeight:n.tipo==="sector"?900:800,color:esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text),lineHeight:1.15,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",wordBreak:"break-word",textAlign:"left",letterSpacing:n.tipo==="sector"?"0.02em":"0"}}>{n.nombre}</span>
-                        {/* Badge del tipo (para sector/cluster) */}
-                        {n.tipo!=="grupo" && (
-                          <span style={{position:"absolute",top:-9,left:10,background:"#fff",color:g.bg,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:8,letterSpacing:"0.06em",boxShadow:"0 1px 3px rgba(0,0,0,.15)",border:`1.5px solid ${g.border}`}}>{cfg.label.toUpperCase()}</span>
-                        )}
+
+                        {/* Línea principal: ícono (solo sede) + nombre */}
+                        <div style={{display:"flex",alignItems:"center",gap:isSede?8:0,justifyContent:"center",width:"100%"}}>
+                          {isSede && (
+                            <CanaIcon size={cfg.iconSize} color={esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text)}/>
+                          )}
+                          <span style={{
+                            fontSize:cfg.fontSize,
+                            fontWeight:cfg.fontWeight,
+                            color:esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text),
+                            lineHeight:1.15,
+                            display:"-webkit-box",
+                            WebkitLineClamp:2,
+                            WebkitBoxOrient:"vertical",
+                            overflow:"hidden",
+                            wordBreak:"break-word",
+                            textAlign: isSede ? "left" : "center",
+                            letterSpacing:isSector?"0.02em":"0",
+                            textTransform:isSector?"uppercase":"none",
+                          }}>{n.nombre}</span>
+                        </div>
+
                         {esJefeActDelOrigen_g && <span style={{position:"absolute",top:-8,right:-8,width:22,height:22,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,boxShadow:"0 2px 6px rgba(0,0,0,.3)",border:"2px solid #fff"}}>✓</span>}
                         {isSel&&!modoAsignar_g&&(
                           <div onClick={e=>{e.stopPropagation();openEdit(n);}}
-                            style={{width:24,height:24,borderRadius:6,background:"rgba(255,255,255,.25)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+                            style={{position:"absolute",top:6,right:6,width:24,height:24,borderRadius:6,background:"rgba(255,255,255,.25)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/></svg>
                           </div>
                         )}

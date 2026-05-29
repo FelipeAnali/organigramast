@@ -1,29 +1,33 @@
-# Organigramast v17.1 — Cambiar nivel jerárquico al editar
+# Organigramast v17.2 — Filtro funcional + diseño mejorado
 
-## Fix
-Cuando editas un grupo (sector / clúster / sede), ahora puedes **cambiar su nivel jerárquico** sin tener que borrarlo y recrearlo.
+## Fix 1: el filtro ahora SÍ filtra el chart
+El bug era que `visibleNodes` (la lista de nodos filtrados) se calculaba bien pero el render del canvas seguía iterando sobre TODOS los nodos. Cambio:
+- Antes: `nodes.map(n=>...)` → renderizaba todo
+- Ahora: `visibleNodes.map(n=>...)` → renderiza solo lo filtrado
 
-En el panel de edición aparece un nuevo selector "Nivel jerárquico" justo debajo del nombre:
-- 🏛️ Sector
-- 📦 Clúster
-- 🎋 Sede
+Ahora cuando marques "Market" en clúster, verás solo los 2 nodos Market + lo que hayas seleccionado en los toggles.
 
-Marca el correcto y guarda. El nodo se mantiene en su posición con sus padres e hijos intactos — solo cambia el tipo (lo que afecta su tamaño, ícono, y su categoría en el filtro).
+## Fix 2: rediseño visual de sectores y clústers
+Antes se veían aplastados con el badge "SECTOR/CLÚSTER" flotando feo arriba.
 
-Si vas a cambiar el tipo, aparece un aviso amarillo:
-"⚠️ Vas a cambiar este nodo de [TipoActual] a [TipoNuevo]"
+**Ahora**:
+- **Sector**: 320×92 px, fondo verde corporativo con borde verde lima, sombra fuerte, layout vertical (badge ARRIBA + nombre ABAJO), letra mayúsculas, tracking amplio. Aspecto majestuoso.
+- **Clúster**: 250×76 px, fondo verde medio, layout vertical, badge "CLÚSTER" integrado, peso 800.
+- **Sede**: 180×64 px (igual a antes), con ícono de caña + nombre en horizontal.
 
-## Caso de uso
-Cuando creaste grupos antes de v16 (sin la distinción sector/clúster/sede), todos quedaron como tipo "sede". Ahora puedes editarlos uno por uno y reclasificarlos:
-- "Norte del Valle" → Sector
-- "Cali y Jamundí" → Sector
-- "Supermercado" → Clúster
-- "Market" → Clúster
-- "SC PALMITEX" → se queda como Sede
+Características del nuevo diseño:
+- Badge integrado DENTRO de la tarjeta (no flotando arriba)
+- Badge con fondo lima translúcido y texto verde lima brillante
+- Sectores tienen borde verde lima `#7DD105` para destacar como nivel más alto
+- Sombras progresivas: sector > clúster > sede
+- Sectores con texto en MAYÚSCULAS y letter-spacing para look corporativo
+- Layout vertical: badge arriba, nombre centrado abajo
+- Botón de editar movido a esquina superior derecha (no entre el contenido)
 
-Una vez reclasificados, el filtro inteligente de v17 los detecta correctamente.
+## Tamaños progresivos garantizados
+El `buildLayout` ahora calcula el ancho real de cada nodo según su tipo, así los sectores anchos no se sobreponen con sus vecinos.
 
-## Etiqueta visible: **v17.1**
+## Etiqueta visible: **v17.2**
 
 ## Archivos
 - `index.html`, `App.jsx`
