@@ -68,6 +68,54 @@ function primaryParentOf(n){
   return ps[0] || "";
 }
 
+/* v16: tipos de nodo-grupo (jerarquía organizacional).
+   - sector: el nivel más alto (ej. Centro, Sur)
+   - cluster: nivel intermedio (ej. Cluster Cali Norte)
+   - grupo: sede (nivel más bajo de agrupación, ej. SC PALMITEX)
+   - persona: empleado individual */
+const GROUP_TYPES = ["sector","cluster","grupo"];
+function isGroupNode(n){
+  if(!n) return false;
+  return GROUP_TYPES.includes(n.tipo);
+}
+
+/* v16: configuración por tipo de grupo (tamaños progresivos + íconos + colores) */
+const GROUP_CONFIG = {
+  sector: {
+    label: "Sector",
+    icon: "🏛️",
+    height: 88,
+    fontSize: 16,
+    iconSize: 24,
+    pal: [
+      { bg:"#0F3A18", border:"#082009", text:"#ffffff" },
+      { bg:"#1C5A2A", border:"#0F3A18", text:"#ffffff" },
+    ],
+  },
+  cluster: {
+    label: "Clúster",
+    icon: "📦",
+    height: 72,
+    fontSize: 14,
+    iconSize: 19,
+    pal: [
+      { bg:"#256B30", border:"#0F3A18", text:"#ffffff" },
+      { bg:"#2D7A3E", border:"#1C5A2A", text:"#ffffff" },
+    ],
+  },
+  grupo: {
+    label: "Sede",
+    icon: "cana",  /* usa CanaIcon */
+    height: 64,
+    fontSize: 13,
+    iconSize: 16,
+    pal: null,  /* usa GPAL existente */
+  },
+};
+function groupCfg(n){
+  return GROUP_CONFIG[n?.tipo] || GROUP_CONFIG.grupo;
+}
+
 /* v12: invertir un nombre tipo "APELLIDO1 APELLIDO2 NOMBRE1 NOMBRE2" → "NOMBRE1 NOMBRE2 APELLIDO1 APELLIDO2".
    Heurística colombiana típica:
    - 4 palabras: 2 apellidos + 2 nombres → mover últimas 2 al inicio
@@ -219,7 +267,10 @@ function buildLayout(nodes, compactSet, autoGroups){
       const k=memberToGroup[id];
       return listBoxHeight(autoGroups[k].members.length);
     }
-    return byId[id]?.tipo==="grupo"?NHG:NH;
+    const n=byId[id];
+    if(!n) return NH;
+    if(isGroupNode(n)) return groupCfg(n).height;  /* v16: sector/cluster/grupo cada uno con altura distinta */
+    return NH;
   };
   const nodeWidth=id=>{
     if(isRepresentative(id)) return LW;
@@ -400,11 +451,14 @@ export default function App(){
   const [lineStyle, setLineStyle] = useState("curved"); // 'curved' | 'orthogonal' | 'straight'
 
   /* v15: filtro por sedes. Estado unificado:
-     - sedes: array de IDs de grupos/sedes seleccionadas (vacío = ver todo)
-     - showBosses: incluir jefes (ancestros) arriba de las sedes filtradas
-     - showSubs: incluir subordinados (descendientes) de las sedes filtradas */
+     v17: refactor — filtros por NOMBRE (consolida nodos duplicados) y separados por nivel.
+     - sectores: array de NOMBRES de sectores seleccionados
+     - clusters: array de NOMBRES de clusters seleccionados
+     - sedes: array de NOMBRES de sedes seleccionadas
+     - showBosses: incluir jefes (ancestros) arriba de los nodos filtrados
+     - showSubs: incluir subordinados (descendientes) de los nodos filtrados */
   const [filterOpen, setFilterOpen] = useState(false);
-  const [viewFilter, setViewFilter] = useState({sedes:[], showBosses:true, showSubs:true});
+  const [viewFilter, setViewFilter] = useState({sectores:[], clusters:[], sedes:[], showBosses:true, showSubs:true});
   const [sel,     setSel]     = useState(null);
   const [addTab,  setAddTab]  = useState("persona"); // "persona"|"grupo"
 
@@ -421,7 +475,7 @@ export default function App(){
   const [rosterFilters, setRosterFilters] = useState({sede:[],cargo:[],dept:[]});
 
   /* form nuevo grupo */
-  const [grpForm, setGrpForm] = useState({nombre:"",colorIdx:0,parentId:"",source:"manual",sourceCol:"area",sourceVal:""});
+  const [grpForm, setGrpForm] = useState({nombre:"",colorIdx:0,parentId:"",source:"manual",sourceCol:"area",sourceVal:"",tipo:"grupo"});
 
   /* edit panel */
   const [editId,   setEditId]   = useState(null);
@@ -494,10 +548,10 @@ export default function App(){
     return()=>window.removeEventListener("beforeunload",h);
   },[dirty]);
 
-  /* v15: cuando cambia el filtro de sedes, resetear el viewport para que el contenido visible quede centrado */
+  /* v15-v17: cuando cambia cualquier filtro, resetear el viewport para que el contenido visible quede centrado */
   useEffect(()=>{
     setVp({x:0,y:0,s:1});
-  },[viewFilter.sedes.length, viewFilter.showBosses, viewFilter.showSubs]);
+  },[viewFilter.sectores?.length, viewFilter.clusters?.length, viewFilter.sedes?.length, viewFilter.showBosses, viewFilter.showSubs]);
 
   const canvasRef  = useRef(null);
   const chartRef   = useRef(null);
@@ -573,13 +627,24 @@ export default function App(){
     return s;
   },[autoGroups]);
 
-  /* v15: nodos visibles según el filtro de sedes */
+  /* v17: nodos visibles según filtro inteligente por nivel jerárquico.
+     Lógica:
+     1. Sin filtros activos → ver todo
+     2. Cada nivel filtrado restringe: solo se ven nodos cuyo nombre esté marcado en su nivel
+        (o que NO tengan filtro activo en su nivel → cualquier nombre vale)
+     3. Para grupos: deben cumplir su filtro Y estar dentro de algún padre que también pase el filtro
+        (intersección jerárquica natural)
+     4. Las personas siempre se incluyen si su sede ancestro está visible (no se filtran por nombre)
+     5. Toggles showBosses/showSubs agregan ancestros/descendientes alrededor de lo filtrado */
   const visibleNodes = useMemo(()=>{
-    const sel = viewFilter.sedes || [];
-    if(sel.length===0) return nodes; /* sin filtro: ver todos */
+    const fSectores = new Set((viewFilter.sectores||[]).map(s=>s.toLowerCase().trim()));
+    const fClusters = new Set((viewFilter.clusters||[]).map(s=>s.toLowerCase().trim()));
+    const fSedes = new Set((viewFilter.sedes||[]).map(s=>s.toLowerCase().trim()));
+
+    const anyFilter = fSectores.size>0 || fClusters.size>0 || fSedes.size>0;
+    if(!anyFilter) return nodes; /* sin filtro: ver todos */
 
     const byId = Object.fromEntries(nodes.map(n=>[n.id,n]));
-    /* hijos de cada nodo */
     const childrenOf = {};
     nodes.forEach(n=>{
       parentsOf(n).forEach(pid=>{
@@ -587,14 +652,50 @@ export default function App(){
       });
     });
 
+    /* helper: ¿el nombre de un nodo está en el filtro de su nivel?
+       Si no hay filtro en ese nivel, retorna true (es decir: "cualquier nombre del nivel está OK"). */
+    const nodePassesOwnLevel = (n)=>{
+      if(!n) return false;
+      const name = (n.nombre||"").toLowerCase().trim();
+      if(n.tipo==="sector")  return fSectores.size===0 || fSectores.has(name);
+      if(n.tipo==="cluster") return fClusters.size===0 || fClusters.has(name);
+      if(n.tipo==="grupo")   return fSedes.size===0 || fSedes.has(name);
+      return true; /* personas pasan, su inclusión depende de su ancestro */
+    };
+
+    /* helper: ¿todos los ancestros (grupos) del nodo pasan SU PROPIO filtro de nivel?
+       Esto implementa la INTERSECCIÓN jerárquica natural.
+       Ej: si filtro sector=Norte y cluster=Supermercado, solo el cluster Supermercado
+       cuyo ancestro sea Norte pasa. */
+    const ancestorsPassLevelFilters = (n)=>{
+      let cur = n;
+      const seen = new Set();
+      while(cur){
+        const ps = parentsOf(cur);
+        if(ps.length===0) break;
+        const parentId = ps[0]; /* solo padre primario para evitar ciclos en multi-jefe */
+        if(seen.has(parentId)) break;
+        seen.add(parentId);
+        const parent = byId[parentId];
+        if(!parent) break;
+        if(isGroupNode(parent) && !nodePassesOwnLevel(parent)) return false;
+        cur = parent;
+      }
+      return true;
+    };
+
+    /* 1. Encontrar nodos GRUPO que pasan: cumplen su nivel Y sus ancestros cumplen los suyos */
     const keep = new Set();
+    nodes.forEach(n=>{
+      if(!isGroupNode(n)) return;
+      if(!nodePassesOwnLevel(n)) return;
+      if(!ancestorsPassLevelFilters(n)) return;
+      keep.add(n.id);
+    });
 
-    /* 1. Las sedes seleccionadas siempre */
-    sel.forEach(id=>keep.add(id));
-
-    /* 2. Subordinados (descendientes) de las sedes seleccionadas */
+    /* 2. Subordinados (descendientes) de cada grupo que pasó */
     if(viewFilter.showSubs){
-      const stack = [...sel];
+      const stack = [...keep];
       while(stack.length){
         const cur = stack.pop();
         (childrenOf[cur]||[]).forEach(cid=>{
@@ -603,16 +704,26 @@ export default function App(){
       }
     }
 
-    /* 3. Jefes superiores (ancestros) de las sedes seleccionadas */
+    /* 3. Jefes superiores (ancestros) de cada grupo que pasó.
+       Ojo: si un sector tiene filtro y el ancestro no cumple, NO lo sumamos
+       (sino contradiríamos el filtro del usuario). Pero si el ancestro es de un
+       nivel SIN filtro, sí lo incluimos. */
     if(viewFilter.showBosses){
-      const stack = [...sel];
-      const seen = new Set(sel);
+      const stack = [...keep];
+      const seen = new Set(keep);
       while(stack.length){
         const cur = stack.pop();
         const node = byId[cur];
+        if(!node) continue;
         parentsOf(node).forEach(pid=>{
+          if(seen.has(pid)) return;
+          const parent = byId[pid];
+          if(!parent) return;
+          /* Si el padre es un grupo con filtro de su nivel activo y no lo cumple → no incluir */
+          if(isGroupNode(parent) && !nodePassesOwnLevel(parent)) return;
           keep.add(pid);
-          if(!seen.has(pid)){ seen.add(pid); stack.push(pid); }
+          seen.add(pid);
+          stack.push(pid);
         });
       }
     }
@@ -842,8 +953,9 @@ export default function App(){
   const addGrupo=()=>{
     const nombre=grpForm.source==="columna"?grpForm.sourceVal:grpForm.nombre;
     if(!nombre.trim())return;
-    setNodes(p=>[...p,{id:`g${Date.now()}`,nombre,colorIdx:grpForm.colorIdx,parentId:grpForm.parentId,tipo:"grupo",...(grpForm.source==="columna"?{sourceCol:grpForm.sourceCol,sourceVal:nombre}:{})}]);
-    setGrpForm({nombre:"",colorIdx:0,parentId:"",source:"manual",sourceCol:"area",sourceVal:""});
+    const tipo=grpForm.tipo||"grupo";
+    setNodes(p=>[...p,{id:`g${Date.now()}`,nombre,colorIdx:grpForm.colorIdx,parentId:grpForm.parentId,tipo,...(grpForm.source==="columna"?{sourceCol:grpForm.sourceCol,sourceVal:nombre}:{})}]);
+    setGrpForm({nombre:"",colorIdx:0,parentId:"",source:"manual",sourceCol:"area",sourceVal:"",tipo});
   };
 
   /* ── v8: Editar (jefes múltiples + foto + datos) ── */
@@ -859,10 +971,10 @@ export default function App(){
   const saveEdit=()=>{
     setNodes(p=>p.map(n=>{
       if(n.id!==editId) return n;
-      const base=n.tipo==="grupo"
+      const base=isGroupNode(n)
         ? {...n, nombre:editNombre||n.nombre, customColor:editColor||undefined}
         : {...n,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,adminLevel:editAdminLevel||undefined};
-      if(n.tipo==="grupo" && !editColor) delete base.customColor;
+      if(isGroupNode(n) && !editColor) delete base.customColor;
       if(n.tipo==="persona" && !editAdminLevel) delete base.adminLevel; /* v13 */
       delete base.parentId;
       delete base.parentIds;
@@ -872,7 +984,7 @@ export default function App(){
       return base;
     }));
     if(editId){
-      const isGrp = nodes.find(n=>n.id===editId)?.tipo==="grupo";
+      const isGrp = isGroupNode(nodes.find(n=>n.id===editId));
       if(!isGrp) setRoster(r=>r.map(x=>x.id===editId?{...x,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,foto:editFoto,adminLevel:editAdminLevel||undefined}:x));
     }
     setPanel(null); setSel(null); setEditId(null);
@@ -899,15 +1011,15 @@ export default function App(){
     if(!bossQ.trim()) return [];
     const q=bossQ.toLowerCase();
     const fromRoster=roster.filter(r=>!r.retirado && r.id!==editId&&[r.nombre,r.cargo,r.area].some(v=>(v||"").toLowerCase().includes(q))).slice(0,20).map(r=>({...r,enChart:inChart.has(r.id)}));
-    const fromGroups=nodes.filter(n=>n.tipo==="grupo"&&n.id!==editId&&(n.nombre||"").toLowerCase().includes(q)).map(n=>({...n,enChart:true,cargo:"Grupo / Sede"}));
+    const fromGroups=nodes.filter(n=>isGroupNode(n)&&n.id!==editId&&(n.nombre||"").toLowerCase().includes(q)).map(n=>({...n,enChart:true,cargo:"Grupo / Sede"}));
     return [...fromGroups,...fromRoster].slice(0,25);
   },[bossQ,roster,nodes,editId,inChart]);
 
   /* ── Quick-add boss search ── */
   const quickBossResults=useMemo(()=>{
     const q=(quickAdd?.q||"").toLowerCase().trim();
-    if(!q) return nodes.slice(0,20).map(n=>({...n,enChart:true,cargo:n.tipo==="grupo"?"Grupo / Sede":n.cargo}));
-    return nodes.filter(n=>(n.nombre||"").toLowerCase().includes(q)||(n.cargo||"").toLowerCase().includes(q)).slice(0,20).map(n=>({...n,enChart:true,cargo:n.tipo==="grupo"?"Grupo / Sede":n.cargo}));
+    if(!q) return nodes.slice(0,20).map(n=>({...n,enChart:true,cargo:isGroupNode(n)?groupCfg(n).label:n.cargo}));
+    return nodes.filter(n=>(n.nombre||"").toLowerCase().includes(q)||(n.cargo||"").toLowerCase().includes(q)).slice(0,20).map(n=>({...n,enChart:true,cargo:isGroupNode(n)?groupCfg(n).label:n.cargo}));
   },[quickAdd?.q,nodes]);
 
   /* ── Export / Import JSON ── */
@@ -1638,7 +1750,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v15</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -1661,17 +1773,21 @@ export default function App(){
             setNodes(p=>p.map(n=>n.tipo==="persona" ? {...n, nombre: invertirNombre(n.nombre)} : n));
           }} title="Invertir orden: APELLIDOS NOMBRES ↔ NOMBRES APELLIDOS">⇄ Reordenar nombres</button>
         )}
-        {/* v15: botón de filtro por sedes */}
-        {nodes.length>0 && nodes.some(n=>n.tipo==="grupo") && (
-          <button onClick={()=>setFilterOpen(o=>!o)}
-            title="Filtrar el organigrama por sedes específicas"
-            style={{padding:"5px 11px",borderRadius:8,border:`1px solid ${viewFilter.sedes.length>0?BRAND.primary:"#CBD5E1"}`,background:viewFilter.sedes.length>0?BRAND.primary:"#fff",color:viewFilter.sedes.length>0?"#fff":"#334155",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5,fontFamily:"inherit"}}>
-            🔍 Filtrar sedes
-            {viewFilter.sedes.length>0 && (
-              <span style={{background:BRAND.accent,color:BRAND.primaryDark,fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,lineHeight:1}}>{viewFilter.sedes.length}</span>
-            )}
-          </button>
-        )}
+        {/* v15-v17: botón de filtro inteligente por sectores/clusters/sedes (consolidado por nombre) */}
+        {nodes.length>0 && nodes.some(n=>isGroupNode(n)) && (()=>{
+          const totalFilters = (viewFilter.sectores?.length||0) + (viewFilter.clusters?.length||0) + (viewFilter.sedes?.length||0);
+          const active = totalFilters>0;
+          return (
+            <button onClick={()=>setFilterOpen(o=>!o)}
+              title="Filtrar el organigrama por sectores, clústers o sedes"
+              style={{padding:"5px 11px",borderRadius:8,border:`1px solid ${active?BRAND.primary:"#CBD5E1"}`,background:active?BRAND.primary:"#fff",color:active?"#fff":"#334155",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5,fontFamily:"inherit"}}>
+              🔍 Filtrar grupos
+              {active && (
+                <span style={{background:BRAND.accent,color:BRAND.primaryDark,fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,lineHeight:1}}>{totalFilters}</span>
+              )}
+            </button>
+          );
+        })()}
         {/* v12: selector de tipo de línea */}
         {nodes.length>0 && (
           <div title="Tipo de línea de conexión" style={{display:"flex",alignItems:"center",gap:4,padding:"3px 4px",background:"#F1F5F9",borderRadius:8,border:"1px solid #E2E8F0"}}>
@@ -1930,8 +2046,29 @@ export default function App(){
             {/* Tab: Grupos */}
             {addTab==="grupo"&&(
               <div style={{padding:"0 14px 14px",overflowY:"auto",flex:1}}>
-                <div style={{padding:"10px 12px",background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:10,marginBottom:14,fontSize:12,color:"#C2410C",lineHeight:1.7}}>
-                  Los <strong>grupos</strong> son nodos intermedios para sedes, áreas o departamentos — no son personas del roster.
+                <div style={{padding:"10px 12px",background:BRAND.bgSoft,border:`1px solid ${BRAND.primary}33`,borderRadius:10,marginBottom:14,fontSize:12,color:BRAND.primaryDark,lineHeight:1.6}}>
+                  Los grupos son contenedores jerárquicos. Crea <strong>Sectores</strong> (nivel más alto), <strong>Clústers</strong> (intermedios) y <strong>Sedes</strong> (más específicos) según tu estructura organizacional.
+                </div>
+
+                {/* v16: Selector de tipo (Sector / Clúster / Sede) */}
+                <div style={{marginBottom:14}}>
+                  <label style={{display:"block",fontSize:12,color:"#64748B",marginBottom:6,fontWeight:600}}>Tipo de grupo</label>
+                  <div style={{display:"flex",gap:6}}>
+                    {[
+                      {v:"sector",l:"🏛️ Sector",sub:"Nivel más alto"},
+                      {v:"cluster",l:"📦 Clúster",sub:"Intermedio"},
+                      {v:"grupo",l:"🎋 Sede",sub:"Específico"},
+                    ].map(o=>{
+                      const active=(grpForm.tipo||"grupo")===o.v;
+                      return (
+                        <button key={o.v} onClick={()=>setGrpForm(f=>({...f,tipo:o.v}))}
+                          style={{flex:1,padding:"8px 4px",borderRadius:8,border:`2px solid ${active?BRAND.primary:"#E2E8F0"}`,background:active?BRAND.bgSoft:"#fff",color:active?BRAND.primaryDark:"#475569",fontSize:11,fontWeight:700,cursor:"pointer",lineHeight:1.3,fontFamily:"inherit"}}>
+                          <div>{o.l}</div>
+                          <div style={{fontSize:9,fontWeight:500,opacity:0.7,marginTop:2}}>{o.sub}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Origen del grupo */}
@@ -1995,7 +2132,7 @@ export default function App(){
                 <button className="btn o" onClick={addGrupo}
                   disabled={grpForm.source==="manual"?!grpForm.nombre.trim():!grpForm.sourceVal}
                   style={{width:"100%"}}>
-                  ＋ Agregar grupo "{grpForm.source==="columna"?grpForm.sourceVal||"…":grpForm.nombre||"…"}"
+                  ＋ Agregar {GROUP_CONFIG[grpForm.tipo||"grupo"].label.toLowerCase()} "{grpForm.source==="columna"?grpForm.sourceVal||"…":grpForm.nombre||"…"}"
                 </button>
 
                 {/* Grupos existentes */}
@@ -2022,7 +2159,7 @@ export default function App(){
         {panel==="edit"&&editNode&&(
           <div style={{width:280,background:"#fff",borderRight:"1px solid #E2E8F0",padding:18,overflowY:"auto",flexShrink:0}}>
             <div style={{fontWeight:700,fontSize:14,color:"#0F172A",marginBottom:14}}>
-              {editNode.tipo==="grupo"?"Editar grupo":"Editar persona"}
+              {isGroupNode(editNode)?"Editar "+groupCfg(editNode).label.toLowerCase():"Editar persona"}
             </div>
 
             {/* Avatar */}
@@ -2092,7 +2229,7 @@ export default function App(){
               </div>
             )}
 
-            {editNode.tipo==="grupo"&&(()=>{
+            {isGroupNode(editNode)&&(()=>{
               const g=gcol(editColor?{customColor:editColor}:editNode);
               const presets=["#3B82F6","#22C55E","#A855F7","#F97316","#EF4444","#14B8A6","#EAB308","#EC4899","#0EA5E9","#84CC16","#8B5CF6","#F59E0B"];
               return(
@@ -2295,51 +2432,104 @@ export default function App(){
                 </div>
               </div>
 
-              {/* Lista de sedes con multi-select */}
+              {/* v17: 3 secciones por nivel jerárquico, consolidando por NOMBRE */}
               <div style={{padding:"10px 14px 6px",flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{fontSize:10,fontWeight:700,color:BRAND.primaryDark,letterSpacing:"0.04em"}}>SEDES</div>
+                <div style={{fontSize:10,fontWeight:700,color:BRAND.primaryDark,letterSpacing:"0.04em"}}>FILTRAR POR</div>
                 <div style={{display:"flex",gap:6}}>
-                  <button onClick={()=>{
-                    const allSedeIds=nodes.filter(n=>n.tipo==="grupo").map(n=>n.id);
-                    setViewFilter(f=>({...f, sedes:allSedeIds}));
-                  }} style={{fontSize:10,padding:"2px 6px",border:`1px solid ${BRAND.primary}55`,background:"#fff",color:BRAND.primary,borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Todas</button>
-                  <button onClick={()=>setViewFilter(f=>({...f, sedes:[]}))}
-                    style={{fontSize:10,padding:"2px 6px",border:`1px solid #CBD5E1`,background:"#fff",color:"#64748B",borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Ninguna</button>
+                  <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[]}))}
+                    style={{fontSize:10,padding:"2px 6px",border:`1px solid #CBD5E1`,background:"#fff",color:"#64748B",borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Limpiar</button>
                 </div>
               </div>
               <div style={{flex:1,overflowY:"auto",padding:"0 14px 10px"}}>
-                {nodes.filter(n=>n.tipo==="grupo").sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).map(sede=>{
-                  const checked = viewFilter.sedes.includes(sede.id);
+                {/* v17: por cada nivel, agrupar nodos por nombre y mostrar el conteo */}
+                {[
+                  {tipo:"sector", filterKey:"sectores"},
+                  {tipo:"cluster", filterKey:"clusters"},
+                  {tipo:"grupo", filterKey:"sedes"},
+                ].map(({tipo, filterKey})=>{
+                  const cfg = GROUP_CONFIG[tipo];
+                  /* Agrupar por nombre (case-insensitive) */
+                  const byName = {};
+                  nodes.filter(n=>n.tipo===tipo).forEach(n=>{
+                    const key = (n.nombre||"").trim();
+                    if(!key) return;
+                    if(!byName[key]) byName[key] = {name:key, count:0};
+                    byName[key].count++;
+                  });
+                  const items = Object.values(byName).sort((a,b)=>a.name.localeCompare(b.name));
+                  if(items.length===0) return null;
+
+                  const filterArr = viewFilter[filterKey] || [];
+                  const filterSet = new Set(filterArr.map(s=>s.toLowerCase().trim()));
+                  const checkedCount = items.filter(it=>filterSet.has(it.name.toLowerCase().trim())).length;
+                  const allChecked = checkedCount===items.length && items.length>0;
+
                   return (
-                    <label key={sede.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 6px",cursor:"pointer",borderRadius:6,fontSize:12,background:checked?BRAND.accent+"22":"transparent"}}>
-                      <input type="checkbox" checked={checked}
-                        onChange={()=>{
+                    <details key={tipo} open style={{marginBottom:6}}>
+                      <summary style={{padding:"4px 6px",cursor:"pointer",borderRadius:6,background:BRAND.bgSoft,fontSize:11,fontWeight:700,color:BRAND.primaryDark,display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:13}}>{tipo==="grupo"?"🎋":cfg.icon}</span>
+                        <span>{cfg.label.toUpperCase()}S</span>
+                        <span style={{flex:1}}/>
+                        <span style={{fontSize:10,color:"#64748B",fontWeight:500}}>{checkedCount}/{items.length}</span>
+                        <button onClick={e=>{
+                          e.preventDefault();
                           setViewFilter(f=>{
-                            const arr=f.sedes||[];
-                            return {...f, sedes: checked?arr.filter(x=>x!==sede.id):[...arr, sede.id]};
+                            if(allChecked) return {...f, [filterKey]:[]};
+                            return {...f, [filterKey]: items.map(it=>it.name)};
                           });
-                        }}
-                        style={{cursor:"pointer",accentColor:BRAND.primary}}/>
-                      <span style={{fontWeight:checked?700:500,color:checked?BRAND.primaryDark:"#334155",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sede.nombre}</span>
-                    </label>
+                        }} style={{fontSize:9,padding:"1px 6px",border:`1px solid ${BRAND.primary}55`,background:"#fff",color:BRAND.primary,borderRadius:4,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>{allChecked?"Quitar":"Todos"}</button>
+                      </summary>
+                      <div style={{paddingLeft:6,marginTop:3}}>
+                        {items.map(it=>{
+                          const lowName = it.name.toLowerCase().trim();
+                          const checked = filterSet.has(lowName);
+                          return (
+                            <label key={it.name} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 6px",cursor:"pointer",borderRadius:6,fontSize:12,background:checked?BRAND.accent+"22":"transparent"}}>
+                              <input type="checkbox" checked={checked}
+                                onChange={()=>{
+                                  setViewFilter(f=>{
+                                    const arr = f[filterKey] || [];
+                                    const next = checked
+                                      ? arr.filter(x=>x.toLowerCase().trim()!==lowName)
+                                      : [...arr, it.name];
+                                    return {...f, [filterKey]: next};
+                                  });
+                                }}
+                                style={{cursor:"pointer",accentColor:BRAND.primary}}/>
+                              <span style={{fontWeight:checked?700:500,color:checked?BRAND.primaryDark:"#334155",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                {it.name}
+                                {it.count>1 && <span style={{color:"#64748B",fontWeight:600,marginLeft:6,fontSize:10}}>({it.count})</span>}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </details>
                   );
                 })}
-                {nodes.filter(n=>n.tipo==="grupo").length===0 && (
-                  <div style={{padding:"12px 4px",fontSize:11,color:"#94A3B8",textAlign:"center"}}>No hay sedes en el chart</div>
+                {nodes.filter(n=>isGroupNode(n)).length===0 && (
+                  <div style={{padding:"12px 4px",fontSize:11,color:"#94A3B8",textAlign:"center"}}>No hay grupos en el chart</div>
                 )}
               </div>
 
-              {/* Footer: botón aplicar y limpiar */}
+              {/* Footer: contador total y limpiar */}
               <div style={{padding:"10px 14px",borderTop:`1px solid ${BRAND.primary}22`,background:"#F8FAFC",display:"flex",gap:6,alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-                <span style={{fontSize:11,color:BRAND.primaryDark,fontWeight:600}}>
-                  {viewFilter.sedes.length===0 ? "Sin filtro (todo visible)" : `${viewFilter.sedes.length} sede${viewFilter.sedes.length!==1?"s":""}`}
-                </span>
-                {viewFilter.sedes.length>0 && (
-                  <button onClick={()=>setViewFilter(f=>({...f, sedes:[]}))}
-                    style={{fontSize:11,padding:"4px 10px",border:`1px solid #FCA5A5`,background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
-                    Limpiar filtro
-                  </button>
-                )}
+                {(()=>{
+                  const total = (viewFilter.sectores?.length||0) + (viewFilter.clusters?.length||0) + (viewFilter.sedes?.length||0);
+                  return (
+                    <>
+                      <span style={{fontSize:11,color:BRAND.primaryDark,fontWeight:600}}>
+                        {total===0 ? "Sin filtro (todo visible)" : `${total} filtro${total!==1?"s":""} activo${total!==1?"s":""}`}
+                      </span>
+                      {total>0 && (
+                        <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[]}))}
+                          style={{fontSize:11,padding:"4px 10px",border:`1px solid #FCA5A5`,background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                          Limpiar filtros
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -2468,28 +2658,40 @@ export default function App(){
                   );
                 }
 
-                if(n.tipo==="grupo"){
+                if(isGroupNode(n)){
                   const g=gcol(n);
+                  const cfg=groupCfg(n);
                   const esJefeActDelOrigen_g = modoAsignar_g && (()=>{
                     const origen=nodes.find(x=>x.id===assignBossFor);
                     return origen && parentsOf(origen).includes(n.id);
                   })();
+                  /* v16: ancho mayor para sectores/clústers (más jerárquicos) */
+                  const groupW = n.tipo==="sector" ? NW+60 : n.tipo==="cluster" ? NW+30 : NW;
                   return(
                     <div key={n.id} className="on"
-                      style={{left:vp.x+p.x*vp.s,top:vp.y+p.y*vp.s,width:NW*vp.s,height:nh*vp.s}}
+                      style={{left:vp.x+p.x*vp.s,top:vp.y+p.y*vp.s,width:groupW*vp.s,height:nh*vp.s}}
                       onClick={e=>{e.stopPropagation(); if(modoAsignar_g){ onAssignBossClick(n.id); return; } setSel(isSel?null:n.id);}}>
                       <div style={{
-                        width:NW,height:nh,transform:`scale(${vp.s})`,transformOrigin:"top left",
+                        width:groupW,height:nh,transform:`scale(${vp.s})`,transformOrigin:"top left",
                         background:esJefeActDelOrigen_g?"#15803D":(modoAsignar_g?"#FBBF24":g.bg),
                         border:`2px solid ${esJefeActDelOrigen_g?"#14532D":(modoAsignar_g?"#D97706":g.border)}`,
-                        borderRadius:10,
-                        boxShadow:isSel?"0 0 0 3px rgba(255,255,255,.5),0 4px 20px rgba(0,0,0,.2)":"0 2px 8px rgba(0,0,0,.15)",
-                        display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"0 14px",
+                        borderRadius:n.tipo==="sector"?14:12,
+                        boxShadow:isSel?"0 0 0 3px rgba(255,255,255,.5),0 4px 20px rgba(0,0,0,.2)":(n.tipo==="sector"?"0 4px 16px rgba(0,0,0,.18)":"0 2px 8px rgba(0,0,0,.15)"),
+                        display:"flex",alignItems:"center",justifyContent:"center",gap:n.tipo==="sector"?12:8,padding:n.tipo==="sector"?"0 20px":"0 14px",
                         cursor:modoAsignar_g?"crosshair":"pointer",
                         position:"relative",
                       }}>
-                        <CanaIcon size={18} color={esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text)}/>
-                        <span style={{fontSize:13,fontWeight:700,color:esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text),lineHeight:1.15,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",wordBreak:"break-word",textAlign:"left"}}>{n.nombre}</span>
+                        {/* Ícono según tipo */}
+                        {n.tipo==="grupo" ? (
+                          <CanaIcon size={cfg.iconSize} color={esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text)}/>
+                        ) : (
+                          <span style={{fontSize:cfg.iconSize, flexShrink:0, filter:"grayscale(0)"}}>{cfg.icon}</span>
+                        )}
+                        <span style={{fontSize:cfg.fontSize,fontWeight:n.tipo==="sector"?900:800,color:esJefeActDelOrigen_g?"#fff":(modoAsignar_g?"#78350F":g.text),lineHeight:1.15,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",wordBreak:"break-word",textAlign:"left",letterSpacing:n.tipo==="sector"?"0.02em":"0"}}>{n.nombre}</span>
+                        {/* Badge del tipo (para sector/cluster) */}
+                        {n.tipo!=="grupo" && (
+                          <span style={{position:"absolute",top:-9,left:10,background:"#fff",color:g.bg,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:8,letterSpacing:"0.06em",boxShadow:"0 1px 3px rgba(0,0,0,.15)",border:`1.5px solid ${g.border}`}}>{cfg.label.toUpperCase()}</span>
+                        )}
                         {esJefeActDelOrigen_g && <span style={{position:"absolute",top:-8,right:-8,width:22,height:22,borderRadius:"50%",background:"#22C55E",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,boxShadow:"0 2px 6px rgba(0,0,0,.3)",border:"2px solid #fff"}}>✓</span>}
                         {isSel&&!modoAsignar_g&&(
                           <div onClick={e=>{e.stopPropagation();openEdit(n);}}

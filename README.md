@@ -1,40 +1,48 @@
-# Organigramast v15 — Filtro por sedes
+# Organigramast v17 — Filtros inteligentes por jerarquía
 
-## Nueva funcionalidad
+## Lógica nueva del filtro
 
-### 🔍 Filtrar el organigrama por sedes
-Aparece un botón **"🔍 Filtrar sedes"** en la toolbar (al lado del selector de líneas)
-cuando hay grupos/sedes en el chart.
+### 1. Consolidación por nombre
+En el panel de filtro, los nodos con el MISMO NOMBRE aparecen UNA sola vez, con el conteo entre paréntesis:
 
-Al hacer clic, se abre un panel flotante en la esquina superior derecha del canvas con:
+```
+☐ Supermercado (2)        ← son dos clusters distintos pero del mismo concepto
+☐ Mayorista (2)
+☐ Market (1)
+```
 
-**Qué mostrar** (2 toggles independientes):
-- 👑 **Mostrar jefes arriba** — incluye los ancestros (jefes superiores) de las sedes seleccionadas
-- 👥 **Mostrar subordinados** — incluye los descendientes (admins, etc.) de las sedes
+Cuando marcas "Supermercado", se incluyen TODOS los nodos llamados "Supermercado" en el chart, en sus posiciones reales.
 
-Las combinaciones permiten varios escenarios:
-- Solo el cuadro de la sede (ambos desactivados): solo ves los rectángulos de las sedes elegidas
-- Sede + jefes: ves la sede y el organigrama hacia arriba
-- Sede + subordinados: ves la sede y todos los admins/staff hacia abajo
-- Sede + ambos: vista completa de esa rama
+### 2. Filtros independientes por nivel
+Cada nivel (Sectores / Clústers / Sedes) tiene su propio filtro. Si un nivel NO tiene nada marcado → "todos los nombres de ese nivel pasan".
 
-**Multi-select de sedes**:
-- Lista ordenada alfabéticamente con todas las sedes del chart
-- Marca las que quieras ver (sin límite)
-- Botones rápidos "Todas" / "Ninguna" arriba
-- Botón "Limpiar filtro" en el footer
+### 3. Intersección jerárquica natural
+Si marcas filtros en MÚLTIPLES niveles, se aplica como una intersección que respeta la jerarquía real:
 
-**Indicadores visuales**:
-- Cuando hay filtro activo, el botón "🔍 Filtrar sedes" se pone verde corporativo con badge numérico (cantidad de sedes filtradas)
-- Las sedes marcadas en el panel se resaltan con fondo verde lima
-- Al cambiar el filtro, el viewport se resetea automáticamente para centrar lo visible
+**Ejemplo 1: solo marco "Supermercado" en clúster**
+- Aparecen los DOS clusters Supermercado (Norte y Cali)
+- Si tengo "mostrar jefes" activado → cada uno con su sector arriba
+- Si tengo "mostrar subordinados" activado → cada uno con sus sedes debajo
 
-### Importante: el PDF respeta el filtro
-Si descargas el PDF con un filtro activo, solo se incluyen las sedes filtradas y
-lo que hayas decidido mostrar alrededor (jefes/subordinados). Útil para generar
-PDFs específicos por sede sin armar otro organigrama.
+**Ejemplo 2: marco "Norte del Valle" en sector + "Supermercado" en clúster**
+- Solo aparece el clúster Supermercado que está dentro de Norte del Valle
+- El Supermercado de Cali queda OCULTO (no cumple el filtro de sector)
 
-## Etiqueta visible: **v15**
+**Ejemplo 3: marco sector="Norte del Valle" + clúster="Market"**
+- Solo aparece Market dentro de Norte del Valle (si existe)
+
+### 4. Toggles independientes
+Los toggles "Mostrar jefes" y "Mostrar subordinados" siguen aplicando igual que antes — agregan ancestros o descendientes a lo que ya pasó el filtro.
+
+### 5. Sin filtros = ver todo
+Si nada está marcado en ningún nivel, se ve todo el organigrama completo.
+
+## Cambios técnicos
+- El estado `viewFilter` ahora tiene `sectores`, `clusters` y `sedes` como arrays de NOMBRES (no IDs)
+- La lógica de `visibleNodes` ahora valida cada nodo: ¿pasa su propio nivel? Y ¿sus ancestros pasan el suyo?
+- Si un filtro de sector está activo, ningún nodo con sector ancestro que NO cumpla podrá aparecer
+
+## Etiqueta visible: **v17**
 
 ## Archivos
 - `index.html`, `App.jsx`
