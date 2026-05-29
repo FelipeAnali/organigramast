@@ -512,6 +512,8 @@ export default function App(){
   const [editNombre, setEditNombre] = useState("");
   /* v12: color personalizado para grupos */
   const [editColor, setEditColor] = useState("");
+  /* v17.1: cambiar tipo de grupo (sector / cluster / sede) desde edición */
+  const [editGroupTipo, setEditGroupTipo] = useState("grupo");
   const [editCargo,  setEditCargo]  = useState("");
   const [editArea,   setEditArea]   = useState("");
   const [editDept,   setEditDept]   = useState("");
@@ -966,13 +968,14 @@ export default function App(){
     setEditNombre(n.nombre||""); setEditCargo(n.cargo||""); setEditArea(n.area||""); setEditDept(n.dept||""); setEditEmail(n.email||"");
     setEditAdminLevel(n.adminLevel||""); /* v13 */
     setEditColor(n.customColor||""); /* v12 */
+    setEditGroupTipo(n.tipo||"grupo"); /* v17.1 */
     setPanel("edit");
   };
   const saveEdit=()=>{
     setNodes(p=>p.map(n=>{
       if(n.id!==editId) return n;
       const base=isGroupNode(n)
-        ? {...n, nombre:editNombre||n.nombre, customColor:editColor||undefined}
+        ? {...n, tipo:editGroupTipo||n.tipo, nombre:editNombre||n.nombre, customColor:editColor||undefined}
         : {...n,foto:editFoto,nombre:editNombre,cargo:editCargo,area:editArea,dept:editDept,email:editEmail,adminLevel:editAdminLevel||undefined};
       if(isGroupNode(n) && !editColor) delete base.customColor;
       if(n.tipo==="persona" && !editAdminLevel) delete base.adminLevel; /* v13 */
@@ -1750,7 +1753,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17.1</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -2245,6 +2248,32 @@ export default function App(){
                   <div style={{marginBottom:14}}>
                     <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>Nombre del grupo / sede</label>
                     <input className="inp" value={editNombre} onChange={e=>setEditNombre(e.target.value)} placeholder="Ej: SC PALMITEX"/>
+                  </div>
+
+                  {/* v17.1: Cambiar tipo (sector / cluster / sede) */}
+                  <div style={{marginBottom:14}}>
+                    <label style={{display:"block",fontSize:12,fontWeight:600,color:"#334155",marginBottom:6}}>Nivel jerárquico</label>
+                    <div style={{display:"flex",gap:6}}>
+                      {[
+                        {v:"sector",l:"🏛️ Sector",sub:"Más alto"},
+                        {v:"cluster",l:"📦 Clúster",sub:"Intermedio"},
+                        {v:"grupo",l:"🎋 Sede",sub:"Específico"},
+                      ].map(o=>{
+                        const active=editGroupTipo===o.v;
+                        return (
+                          <button key={o.v} onClick={()=>setEditGroupTipo(o.v)}
+                            style={{flex:1,padding:"7px 4px",borderRadius:8,border:`2px solid ${active?BRAND.primary:"#E2E8F0"}`,background:active?BRAND.bgSoft:"#fff",color:active?BRAND.primaryDark:"#475569",fontSize:11,fontWeight:700,cursor:"pointer",lineHeight:1.3,fontFamily:"inherit"}}>
+                            <div>{o.l}</div>
+                            <div style={{fontSize:9,fontWeight:500,opacity:0.7,marginTop:2}}>{o.sub}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {editGroupTipo!==editNode.tipo && (
+                      <div style={{marginTop:6,padding:"5px 9px",background:BRAND.accent+"33",border:`1px solid ${BRAND.accent}`,borderRadius:6,fontSize:11,color:BRAND.primaryDark}}>
+                        ⚠️ Vas a cambiar este nodo de <strong>{GROUP_CONFIG[editNode.tipo].label}</strong> a <strong>{GROUP_CONFIG[editGroupTipo].label}</strong>
+                      </div>
+                    )}
                   </div>
 
                   {/* v12: Color personalizado */}

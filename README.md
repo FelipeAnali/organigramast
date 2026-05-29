@@ -1,48 +1,29 @@
-# Organigramast v17 — Filtros inteligentes por jerarquía
+# Organigramast v17.1 — Cambiar nivel jerárquico al editar
 
-## Lógica nueva del filtro
+## Fix
+Cuando editas un grupo (sector / clúster / sede), ahora puedes **cambiar su nivel jerárquico** sin tener que borrarlo y recrearlo.
 
-### 1. Consolidación por nombre
-En el panel de filtro, los nodos con el MISMO NOMBRE aparecen UNA sola vez, con el conteo entre paréntesis:
+En el panel de edición aparece un nuevo selector "Nivel jerárquico" justo debajo del nombre:
+- 🏛️ Sector
+- 📦 Clúster
+- 🎋 Sede
 
-```
-☐ Supermercado (2)        ← son dos clusters distintos pero del mismo concepto
-☐ Mayorista (2)
-☐ Market (1)
-```
+Marca el correcto y guarda. El nodo se mantiene en su posición con sus padres e hijos intactos — solo cambia el tipo (lo que afecta su tamaño, ícono, y su categoría en el filtro).
 
-Cuando marcas "Supermercado", se incluyen TODOS los nodos llamados "Supermercado" en el chart, en sus posiciones reales.
+Si vas a cambiar el tipo, aparece un aviso amarillo:
+"⚠️ Vas a cambiar este nodo de [TipoActual] a [TipoNuevo]"
 
-### 2. Filtros independientes por nivel
-Cada nivel (Sectores / Clústers / Sedes) tiene su propio filtro. Si un nivel NO tiene nada marcado → "todos los nombres de ese nivel pasan".
+## Caso de uso
+Cuando creaste grupos antes de v16 (sin la distinción sector/clúster/sede), todos quedaron como tipo "sede". Ahora puedes editarlos uno por uno y reclasificarlos:
+- "Norte del Valle" → Sector
+- "Cali y Jamundí" → Sector
+- "Supermercado" → Clúster
+- "Market" → Clúster
+- "SC PALMITEX" → se queda como Sede
 
-### 3. Intersección jerárquica natural
-Si marcas filtros en MÚLTIPLES niveles, se aplica como una intersección que respeta la jerarquía real:
+Una vez reclasificados, el filtro inteligente de v17 los detecta correctamente.
 
-**Ejemplo 1: solo marco "Supermercado" en clúster**
-- Aparecen los DOS clusters Supermercado (Norte y Cali)
-- Si tengo "mostrar jefes" activado → cada uno con su sector arriba
-- Si tengo "mostrar subordinados" activado → cada uno con sus sedes debajo
-
-**Ejemplo 2: marco "Norte del Valle" en sector + "Supermercado" en clúster**
-- Solo aparece el clúster Supermercado que está dentro de Norte del Valle
-- El Supermercado de Cali queda OCULTO (no cumple el filtro de sector)
-
-**Ejemplo 3: marco sector="Norte del Valle" + clúster="Market"**
-- Solo aparece Market dentro de Norte del Valle (si existe)
-
-### 4. Toggles independientes
-Los toggles "Mostrar jefes" y "Mostrar subordinados" siguen aplicando igual que antes — agregan ancestros o descendientes a lo que ya pasó el filtro.
-
-### 5. Sin filtros = ver todo
-Si nada está marcado en ningún nivel, se ve todo el organigrama completo.
-
-## Cambios técnicos
-- El estado `viewFilter` ahora tiene `sectores`, `clusters` y `sedes` como arrays de NOMBRES (no IDs)
-- La lógica de `visibleNodes` ahora valida cada nodo: ¿pasa su propio nivel? Y ¿sus ancestros pasan el suyo?
-- Si un filtro de sector está activo, ningún nodo con sector ancestro que NO cumpla podrá aparecer
-
-## Etiqueta visible: **v17**
+## Etiqueta visible: **v17.1**
 
 ## Archivos
 - `index.html`, `App.jsx`
