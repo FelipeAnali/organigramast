@@ -1,33 +1,45 @@
-# Organigramast v17.2 — Filtro funcional + diseño mejorado
+# Organigramast v17.4 — Fix de filtro a través de personas + debug
 
-## Fix 1: el filtro ahora SÍ filtra el chart
-El bug era que `visibleNodes` (la lista de nodos filtrados) se calculaba bien pero el render del canvas seguía iterando sobre TODOS los nodos. Cambio:
-- Antes: `nodes.map(n=>...)` → renderizaba todo
-- Ahora: `visibleNodes.map(n=>...)` → renderiza solo lo filtrado
+## Fix
+**El problema**: la jerarquía real tiene PERSONAS (jefes de operaciones) entre grupos:
+```
+Supertiendas Cañaveral (raíz)
+  └── CH, SJ (personas - jefes de operaciones)
+        └── Sectores → Clusters → Sedes → Admins
+```
 
-Ahora cuando marques "Market" en clúster, verás solo los 2 nodos Market + lo que hayas seleccionado en los toggles.
+La función anterior `checkAncestorsForLevel` recorría padres uno por uno y se detenía
+en cuanto encontraba un nodo del tipo buscado o sin más padres. Pero el problema es
+que al filtrar "Market" (clúster), buscar el ancestro "sector" funciona porque pasa por
+la persona y sube — eso debería estar OK.
 
-## Fix 2: rediseño visual de sectores y clústers
-Antes se veían aplastados con el badge "SECTOR/CLÚSTER" flotando feo arriba.
+Pero pude haber tenido un bug sutil. La nueva versión:
+- Usa una función `findAncestorOfType` que SIEMPRE sigue subiendo sin importar el tipo
+  intermedio, hasta encontrar el ancestro del tipo buscado o llegar a la raíz
+- Permite que las personas (jefes de operaciones) entre grupos no rompan la cadena
 
-**Ahora**:
-- **Sector**: 320×92 px, fondo verde corporativo con borde verde lima, sombra fuerte, layout vertical (badge ARRIBA + nombre ABAJO), letra mayúsculas, tracking amplio. Aspecto majestuoso.
-- **Clúster**: 250×76 px, fondo verde medio, layout vertical, badge "CLÚSTER" integrado, peso 800.
-- **Sede**: 180×64 px (igual a antes), con ícono de caña + nombre en horizontal.
+## Botón de debug 🐛
+Ahora hay un botón en el footer del filtro que activa logging en la consola del navegador.
 
-Características del nuevo diseño:
-- Badge integrado DENTRO de la tarjeta (no flotando arriba)
-- Badge con fondo lima translúcido y texto verde lima brillante
-- Sectores tienen borde verde lima `#7DD105` para destacar como nivel más alto
-- Sombras progresivas: sector > clúster > sede
-- Sectores con texto en MAYÚSCULAS y letter-spacing para look corporativo
-- Layout vertical: badge arriba, nombre centrado abajo
-- Botón de editar movido a esquina superior derecha (no entre el contenido)
+**Cómo usarlo**:
+1. Abre el panel del filtro
+2. Marca alguna sede/cluster/sector
+3. Aprieta el botón 🐛 (un alert te dice "Debug ACTIVADO")
+4. Abre la consola del navegador (F12 → Console)
+5. Toca cualquier checkbox del filtro y verás en consola:
+   - Qué filtros están activos
+   - Cuáles son los SEEDS (nodos que coincidieron)
+   - Cuántos nodos quedan visibles al final
 
-## Tamaños progresivos garantizados
-El `buildLayout` ahora calcula el ancho real de cada nodo según su tipo, así los sectores anchos no se sobreponen con sus vecinos.
+Esto te permite mandarme el log para diagnosticar exactamente el problema.
 
-## Etiqueta visible: **v17.2**
+## Etiqueta visible: **v17.4**
+
+## Por favor prueba:
+1. Marca "Market" en clúster
+2. Apunta cuántos nodos dice "Mostrando X de Y" en el footer
+3. Activa 🐛 y vuelve a marcar/desmarcar Market
+4. Pasame el log de consola (F12) o un screenshot
 
 ## Archivos
 - `index.html`, `App.jsx`

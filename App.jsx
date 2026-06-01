@@ -637,22 +637,18 @@ export default function App(){
     return s;
   },[autoGroups]);
 
-  /* v17: nodos visibles según filtro inteligente por nivel jerárquico.
-     Lógica:
-     1. Sin filtros activos → ver todo
-     2. Cada nivel filtrado restringe: solo se ven nodos cuyo nombre esté marcado en su nivel
-        (o que NO tengan filtro activo en su nivel → cualquier nombre vale)
-     3. Para grupos: deben cumplir su filtro Y estar dentro de algún padre que también pase el filtro
-        (intersección jerárquica natural)
-     4. Las personas siempre se incluyen si su sede ancestro está visible (no se filtran por nombre)
-     5. Toggles showBosses/showSubs agregan ancestros/descendientes alrededor de lo filtrado */
+  /* v17.4: nodos visibles — lógica con SEED + EXPANSIÓN + debug.
+     Importante: la jerarquía puede tener PERSONAS entre grupos (ej. jefes de operaciones).
+     Cuando buscamos un "ancestro de tipo X", debemos seguir subiendo a través de personas. */
   const visibleNodes = useMemo(()=>{
     const fSectores = new Set((viewFilter.sectores||[]).map(s=>s.toLowerCase().trim()));
     const fClusters = new Set((viewFilter.clusters||[]).map(s=>s.toLowerCase().trim()));
     const fSedes = new Set((viewFilter.sedes||[]).map(s=>s.toLowerCase().trim()));
 
     const anyFilter = fSectores.size>0 || fClusters.size>0 || fSedes.size>0;
-    if(!anyFilter) return nodes; /* sin filtro: ver todos */
+    if(!anyFilter) return nodes;
+
+    const debug = (typeof window!=="undefined") && window.__DEBUG_FILTER;
 
     const byId = Object.fromEntries(nodes.map(n=>[n.id,n]));
     const childrenOf = {};
@@ -662,62 +658,89 @@ export default function App(){
       });
     });
 
-    /* helper: ¿el nombre de un nodo está en el filtro de su nivel?
-       Si no hay filtro en ese nivel, retorna true (es decir: "cualquier nombre del nivel está OK"). */
-    const nodePassesOwnLevel = (n)=>{
+    const norm = s => (s||"").toLowerCase().trim();
+
+    const isExplicitlyMarked = (n)=>{
       if(!n) return false;
-      const name = (n.nombre||"").toLowerCase().trim();
-      if(n.tipo==="sector")  return fSectores.size===0 || fSectores.has(name);
-      if(n.tipo==="cluster") return fClusters.size===0 || fClusters.has(name);
-      if(n.tipo==="grupo")   return fSedes.size===0 || fSedes.has(name);
-      return true; /* personas pasan, su inclusión depende de su ancestro */
+      const name = norm(n.nombre);
+      if(n.tipo==="sector")  return fSectores.has(name);
+      if(n.tipo==="cluster") return fClusters.has(name);
+      if(n.tipo==="grupo")   return fSedes.has(name);
+      return false;
     };
 
-    /* helper: ¿todos los ancestros (grupos) del nodo pasan SU PROPIO filtro de nivel?
-       Esto implementa la INTERSECCIÓN jerárquica natural.
-       Ej: si filtro sector=Norte y cluster=Supermercado, solo el cluster Supermercado
-       cuyo ancestro sea Norte pasa. */
-    const ancestorsPassLevelFilters = (n)=>{
+    /* Busca el ancestro de tipo X recorriendo la cadena de padres,
+       saltando personas y otros grupos que no sean del tipo buscado.
+       Si el nodo MISMO es de ese tipo, retorna su propio nombre. */
+    const findAncestorOfType = (n, tipo)=>{
+      if(n.tipo===tipo) return n;
       let cur = n;
       const seen = new Set();
       while(cur){
         const ps = parentsOf(cur);
-        if(ps.length===0) break;
-        const parentId = ps[0]; /* solo padre primario para evitar ciclos en multi-jefe */
-        if(seen.has(parentId)) break;
-        seen.add(parentId);
-        const parent = byId[parentId];
-        if(!parent) break;
-        if(isGroupNode(parent) && !nodePassesOwnLevel(parent)) return false;
+        if(ps.length===0) return null;
+        const pid = ps[0];
+        if(seen.has(pid)) return null;
+        seen.add(pid);
+        const parent = byId[pid];
+        if(!parent) return null;
+        if(parent.tipo===tipo) return parent;
         cur = parent;
       }
+      return null;
+    };
+
+    /* Compatible con un filtro de nivel: si filtro está vacío, todos OK.
+       Si filtro tiene valores, debe haber un ancestro (o el propio nodo) del tipo
+       cuyo nombre esté marcado. */
+    const compatibleConNivel = (n, tipo, filterSet)=>{
+      if(filterSet.size===0) return true;
+      const anc = findAncestorOfType(n, tipo);
+      if(!anc) return false;  /* no hay ancestro de ese tipo: no pasa */
+      return filterSet.has(norm(anc.nombre));
+    };
+
+    const compatibleConFiltros = (n)=>{
+      if(!compatibleConNivel(n, "sector", fSectores)) return false;
+      if(!compatibleConNivel(n, "cluster", fClusters)) return false;
+      if(!compatibleConNivel(n, "grupo", fSedes)) return false;
       return true;
     };
 
-    /* 1. Encontrar nodos GRUPO que pasan: cumplen su nivel Y sus ancestros cumplen los suyos */
+    /* SEED: grupos del nivel filtrado cuyo nombre coincide + compatibles */
     const keep = new Set();
+    const seeds = [];
     nodes.forEach(n=>{
       if(!isGroupNode(n)) return;
-      if(!nodePassesOwnLevel(n)) return;
-      if(!ancestorsPassLevelFilters(n)) return;
+      if(!isExplicitlyMarked(n)) return;
+      if(!compatibleConFiltros(n)) return;
       keep.add(n.id);
+      seeds.push(n);
     });
 
-    /* 2. Subordinados (descendientes) de cada grupo que pasó */
+    if(debug){
+      console.log("=== FILTER DEBUG ===");
+      console.log("Filtros:", {sectores:[...fSectores], clusters:[...fClusters], sedes:[...fSedes]});
+      console.log(`Seeds (${seeds.length}):`, seeds.map(s=>`[${s.tipo}] ${s.nombre}`));
+    }
+
+    /* EXPANSIÓN hacia abajo (descendientes) */
     if(viewFilter.showSubs){
       const stack = [...keep];
       while(stack.length){
         const cur = stack.pop();
         (childrenOf[cur]||[]).forEach(cid=>{
-          if(!keep.has(cid)){ keep.add(cid); stack.push(cid); }
+          if(keep.has(cid)) return;
+          const cn = byId[cid];
+          if(!cn) return;
+          if(isGroupNode(cn) && !compatibleConFiltros(cn)) return;
+          keep.add(cid);
+          stack.push(cid);
         });
       }
     }
 
-    /* 3. Jefes superiores (ancestros) de cada grupo que pasó.
-       Ojo: si un sector tiene filtro y el ancestro no cumple, NO lo sumamos
-       (sino contradiríamos el filtro del usuario). Pero si el ancestro es de un
-       nivel SIN filtro, sí lo incluimos. */
+    /* EXPANSIÓN hacia arriba (ancestros) — incluso a través de personas */
     if(viewFilter.showBosses){
       const stack = [...keep];
       const seen = new Set(keep);
@@ -729,13 +752,18 @@ export default function App(){
           if(seen.has(pid)) return;
           const parent = byId[pid];
           if(!parent) return;
-          /* Si el padre es un grupo con filtro de su nivel activo y no lo cumple → no incluir */
-          if(isGroupNode(parent) && !nodePassesOwnLevel(parent)) return;
+          /* Si el padre es un grupo, debe cumplir filtros */
+          if(isGroupNode(parent) && !compatibleConFiltros(parent)) return;
           keep.add(pid);
           seen.add(pid);
           stack.push(pid);
         });
       }
+    }
+
+    if(debug){
+      const result = nodes.filter(n=>keep.has(n.id));
+      console.log(`Visibles (${result.length}/${nodes.length}):`, result.map(n=>`[${n.tipo}] ${n.nombre}`));
     }
 
     return nodes.filter(n=>keep.has(n.id));
@@ -1761,7 +1789,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17.2</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17.4</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -2550,20 +2578,42 @@ export default function App(){
               </div>
 
               {/* Footer: contador total y limpiar */}
-              <div style={{padding:"10px 14px",borderTop:`1px solid ${BRAND.primary}22`,background:"#F8FAFC",display:"flex",gap:6,alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+              <div style={{padding:"10px 14px",borderTop:`1px solid ${BRAND.primary}22`,background:"#F8FAFC",display:"flex",gap:6,alignItems:"center",justifyContent:"space-between",flexShrink:0,flexWrap:"wrap"}}>
                 {(()=>{
                   const total = (viewFilter.sectores?.length||0) + (viewFilter.clusters?.length||0) + (viewFilter.sedes?.length||0);
                   return (
                     <>
-                      <span style={{fontSize:11,color:BRAND.primaryDark,fontWeight:600}}>
-                        {total===0 ? "Sin filtro (todo visible)" : `${total} filtro${total!==1?"s":""} activo${total!==1?"s":""}`}
-                      </span>
-                      {total>0 && (
-                        <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[]}))}
-                          style={{fontSize:11,padding:"4px 10px",border:`1px solid #FCA5A5`,background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
-                          Limpiar filtros
-                        </button>
-                      )}
+                      <div style={{display:"flex",flexDirection:"column",gap:2,flex:1,minWidth:0}}>
+                        <span style={{fontSize:11,color:BRAND.primaryDark,fontWeight:600}}>
+                          {total===0 ? "Sin filtro (todo visible)" : `${total} filtro${total!==1?"s":""} activo${total!==1?"s":""}`}
+                        </span>
+                        {total>0 && (
+                          <span style={{fontSize:10,color:"#64748B"}}>
+                            Mostrando {visibleNodes.length} de {nodes.length} nodos
+                          </span>
+                        )}
+                      </div>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {/* v17.4: botón de debug para diagnosticar filtro */}
+                        {total>0 && (
+                          <button onClick={()=>{
+                            if(typeof window!=="undefined") window.__DEBUG_FILTER = !window.__DEBUG_FILTER;
+                            /* Forzar re-render del filtro tocando el estado */
+                            setViewFilter(f=>({...f}));
+                            alert(`Debug ${window.__DEBUG_FILTER?"ACTIVADO":"desactivado"}. Abre la consola del navegador (F12) y vuelve a tocar el filtro para ver el log.`);
+                          }}
+                          title="Activa el log en consola del navegador (F12) para diagnosticar el filtro"
+                          style={{fontSize:11,padding:"4px 8px",border:`1px solid ${BRAND.primary}55`,background:"#fff",color:BRAND.primary,borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                            🐛
+                          </button>
+                        )}
+                        {total>0 && (
+                          <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[]}))}
+                            style={{fontSize:11,padding:"4px 10px",border:`1px solid #FCA5A5`,background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                            Limpiar
+                          </button>
+                        )}
+                      </div>
                     </>
                   );
                 })()}
