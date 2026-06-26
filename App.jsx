@@ -466,7 +466,7 @@ export default function App(){
      - showBosses: incluir jefes (ancestros) arriba de los nodos filtrados
      - showSubs: incluir subordinados (descendientes) de los nodos filtrados */
   const [filterOpen, setFilterOpen] = useState(false);
-  const [viewFilter, setViewFilter] = useState({sectores:[], clusters:[], sedes:[], showBosses:true, showSubs:true});
+  const [viewFilter, setViewFilter] = useState({sectores:[], clusters:[], sedes:[], personQuery:"", showBosses:true, showSubs:true});
   const [sel,     setSel]     = useState(null);
   const [addTab,  setAddTab]  = useState("persona"); // "persona"|"grupo"
 
@@ -492,7 +492,7 @@ export default function App(){
   const [bossQ,    setBossQ]    = useState("");
 
   /* quick-add connection */
-  const [quickAdd, setQuickAdd] = useState(null); // {person, parentId:"", q:""}
+  const [quickAdd, setQuickAdd] = useState(null); // {person, parentIds:[], q:"", filters:{sede:[], cargo:[], dept:[]}}
 
   /* ── v7: modo compacto (lista) por nodo. Set con IDs cuyos DESCENDIENTES se renderizan compactos ── */
   const [compactSet, setCompactSet] = useState(() => new Set());
@@ -561,7 +561,7 @@ export default function App(){
   /* v15-v17: cuando cambia cualquier filtro, resetear el viewport para que el contenido visible quede centrado */
   useEffect(()=>{
     setVp({x:0,y:0,s:1});
-  },[viewFilter.sectores?.length, viewFilter.clusters?.length, viewFilter.sedes?.length, viewFilter.showBosses, viewFilter.showSubs]);
+  },[viewFilter.sectores?.length, viewFilter.clusters?.length, viewFilter.sedes?.length, viewFilter.personQuery, viewFilter.showBosses, viewFilter.showSubs]);
 
   const canvasRef  = useRef(null);
   const chartRef   = useRef(null);
@@ -603,7 +603,7 @@ export default function App(){
 
   /* ── v11: auto-agrupamiento. Subordinados que comparten EXACTAMENTE el mismo conjunto de jefes
      (cuando son >=3) se muestran como caja-lista única. Clave: conjunto ordenado de parentIds. ── */
-  const MIN_GROUP_SIZE = 3;
+  const MIN_GROUP_SIZE = 2;  /* v18.1: bajado de 3 a 2 para consolidar siempre que sean 2+ */
   const autoGroups = useMemo(()=>{
     const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
     const map=new Map();
@@ -644,8 +644,9 @@ export default function App(){
     const fSectores = new Set((viewFilter.sectores||[]).map(s=>s.toLowerCase().trim()));
     const fClusters = new Set((viewFilter.clusters||[]).map(s=>s.toLowerCase().trim()));
     const fSedes = new Set((viewFilter.sedes||[]).map(s=>s.toLowerCase().trim()));
+    const personQuery = (viewFilter.personQuery||"").toLowerCase().trim();
 
-    const anyFilter = fSectores.size>0 || fClusters.size>0 || fSedes.size>0;
+    const anyFilter = fSectores.size>0 || fClusters.size>0 || fSedes.size>0 || personQuery.length>0;
     if(!anyFilter) return nodes;
 
     const debug = (typeof window!=="undefined") && window.__DEBUG_FILTER;
@@ -710,17 +711,37 @@ export default function App(){
     /* SEED: grupos del nivel filtrado cuyo nombre coincide + compatibles */
     const keep = new Set();
     const seeds = [];
-    nodes.forEach(n=>{
-      if(!isGroupNode(n)) return;
-      if(!isExplicitlyMarked(n)) return;
-      if(!compatibleConFiltros(n)) return;
-      keep.add(n.id);
-      seeds.push(n);
-    });
+
+    /* Caso 1: solo hay personQuery sin filtros de grupo:
+       Las personas que coincidan son seeds. Sus ancestros se agregarán con showBosses. */
+    const hayFiltroGrupos = fSectores.size>0 || fClusters.size>0 || fSedes.size>0;
+
+    if(personQuery){
+      /* Buscar personas que coincidan, opcionalmente dentro de los grupos filtrados */
+      nodes.forEach(n=>{
+        if(n.tipo!=="persona") return;
+        if(hayFiltroGrupos && !compatibleConFiltros(n)) return;
+        const txt = [n.nombre,n.cargo,n.area,n.dept,n.email].filter(Boolean).join(" ").toLowerCase();
+        if(!txt.includes(personQuery)) return;
+        keep.add(n.id);
+        seeds.push(n);
+      });
+    }
+
+    if(hayFiltroGrupos){
+      nodes.forEach(n=>{
+        if(!isGroupNode(n)) return;
+        if(!isExplicitlyMarked(n)) return;
+        if(!compatibleConFiltros(n)) return;
+        if(keep.has(n.id)) return;
+        keep.add(n.id);
+        seeds.push(n);
+      });
+    }
 
     if(debug){
       console.log("=== FILTER DEBUG ===");
-      console.log("Filtros:", {sectores:[...fSectores], clusters:[...fClusters], sedes:[...fSedes]});
+      console.log("Filtros:", {sectores:[...fSectores], clusters:[...fClusters], sedes:[...fSedes], personQuery});
       console.log(`Seeds (${seeds.length}):`, seeds.map(s=>`[${s.tipo}] ${s.nombre}`));
     }
 
@@ -921,7 +942,7 @@ export default function App(){
       if(!confirm(`⚠️ ${r.nombre} está marcado como RETIRADO en el roster.\n\n¿Agregarlo al chart de todos modos?`)) return;
     }
     if(nodes.length===0){ setNodes(p=>[...p,{...r,parentId:"",tipo:"persona"}]); return; }
-    setQuickAdd({person:r,parentIds:[],q:""});
+    setQuickAdd({person:r,parentIds:[],q:"",filters:{sede:[],cargo:[],dept:[]}});
   };
 
   /* v12.4: agregar persona MANUAL al roster (no del Excel) */
@@ -1054,12 +1075,55 @@ export default function App(){
     return [...fromGroups,...fromRoster].slice(0,25);
   },[bossQ,roster,nodes,editId,inChart]);
 
-  /* ── Quick-add boss search ── */
+  /* ── Quick-add boss search con filtros sede/cargo/depto ── */
   const quickBossResults=useMemo(()=>{
     const q=(quickAdd?.q||"").toLowerCase().trim();
-    if(!q) return nodes.slice(0,20).map(n=>({...n,enChart:true,cargo:isGroupNode(n)?groupCfg(n).label:n.cargo}));
-    return nodes.filter(n=>(n.nombre||"").toLowerCase().includes(q)||(n.cargo||"").toLowerCase().includes(q)).slice(0,20).map(n=>({...n,enChart:true,cargo:isGroupNode(n)?groupCfg(n).label:n.cargo}));
-  },[quickAdd?.q,nodes]);
+    const filters=quickAdd?.filters||{sede:[],cargo:[],dept:[]};
+    const hasFilters = filters.sede.length>0 || filters.cargo.length>0 || filters.dept.length>0;
+
+    return nodes.filter(n=>{
+      /* Filtro por sede (área) */
+      if(filters.sede.length>0){
+        /* Para grupos: el área es el propio nombre. Para personas: n.area */
+        const sede = isGroupNode(n) ? n.nombre : n.area;
+        if(!filters.sede.includes(sede||"")) return false;
+      }
+      /* Filtro por cargo (solo aplica a personas, los grupos pasan si no se filtran) */
+      if(filters.cargo.length>0){
+        if(isGroupNode(n)) return false; /* si pides filtro cargo, los grupos no entran */
+        if(!filters.cargo.includes(n.cargo||"")) return false;
+      }
+      /* Filtro por depto */
+      if(filters.dept.length>0){
+        if(isGroupNode(n)) return false;
+        if(!filters.dept.includes(n.dept||"")) return false;
+      }
+      /* Búsqueda por texto */
+      if(q){
+        const txt = [n.nombre,n.cargo,n.area,n.dept].filter(Boolean).join(" ").toLowerCase();
+        if(!txt.includes(q)) return false;
+      }
+      return true;
+    }).slice(0,30).map(n=>({...n,enChart:true,cargo:isGroupNode(n)?groupCfg(n).label:n.cargo}));
+  },[quickAdd?.q,quickAdd?.filters,nodes]);
+
+  /* v18: opciones únicas para filtros del quickAdd (sacadas de los nodos del chart) */
+  const quickAddFilterOptions = useMemo(()=>{
+    const sedes=new Set(), cargos=new Set(), depts=new Set();
+    nodes.forEach(n=>{
+      if(isGroupNode(n)){ if(n.nombre) sedes.add(n.nombre); }
+      else{
+        if(n.area) sedes.add(n.area);
+        if(n.cargo) cargos.add(n.cargo);
+        if(n.dept) depts.add(n.dept);
+      }
+    });
+    return {
+      sedes:[...sedes].sort(),
+      cargos:[...cargos].sort(),
+      depts:[...depts].sort(),
+    };
+  },[nodes]);
 
   /* ── Export / Import JSON ── */
   const exportJSON=()=>{
@@ -1437,7 +1501,7 @@ export default function App(){
   const editNode=nodes.find(n=>n.id===editId);
 
   return(
-    <div style={{display:"flex",flexDirection:"column",height:660,fontFamily:FONT,background:BRAND.bgPanel,overflow:"hidden"}}>
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",minHeight:560,fontFamily:FONT,background:BRAND.bgPanel,overflow:"hidden"}}>
       <style>{CSS}</style>
 
       {/* v8+v11: Banner modo asignar jefe (persona individual O lista completa) */}
@@ -1789,7 +1853,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v17.4</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.1</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -1814,7 +1878,7 @@ export default function App(){
         )}
         {/* v15-v17: botón de filtro inteligente por sectores/clusters/sedes (consolidado por nombre) */}
         {nodes.length>0 && nodes.some(n=>isGroupNode(n)) && (()=>{
-          const totalFilters = (viewFilter.sectores?.length||0) + (viewFilter.clusters?.length||0) + (viewFilter.sedes?.length||0);
+          const totalFilters = (viewFilter.sectores?.length||0) + (viewFilter.clusters?.length||0) + (viewFilter.sedes?.length||0) + (viewFilter.personQuery ? 1 : 0);
           const active = totalFilters>0;
           return (
             <button onClick={()=>setFilterOpen(o=>!o)}
@@ -2022,17 +2086,94 @@ export default function App(){
                         )}
 
                         <input className="inp" value={quickAdd.q} onChange={e=>setQuickAdd(f=>({...f,q:e.target.value}))} placeholder={quickAdd.parentIds?.length?"Buscar otro jefe…":"Buscar jefe en el chart…"} style={{marginBottom:6,borderColor:"#BAE6FD"}}/>
+
+                        {/* v18: Filtros sede/cargo/depto (colapsable) */}
+                        {(()=>{
+                          const f = quickAdd.filters||{sede:[],cargo:[],dept:[]};
+                          const totalFilters = f.sede.length+f.cargo.length+f.dept.length;
+                          return (
+                            <details style={{marginBottom:6}} open={totalFilters>0}>
+                              <summary style={{padding:"5px 8px",cursor:"pointer",borderRadius:6,background:totalFilters>0?BRAND.accent+"22":"#F1F5F9",fontSize:11,fontWeight:600,color:BRAND.primaryDark,display:"flex",alignItems:"center",gap:6,border:`1px solid ${totalFilters>0?BRAND.accent:"#E2E8F0"}`}}>
+                                <span>🔍 Filtros</span>
+                                {totalFilters>0 && <span style={{background:BRAND.primary,color:"#fff",fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:8}}>{totalFilters}</span>}
+                                <span style={{flex:1,textAlign:"right",fontSize:9,color:"#64748B",fontWeight:500}}>{quickBossResults.length} resultado{quickBossResults.length!==1?"s":""}</span>
+                              </summary>
+                              <div style={{padding:"8px",background:"#fff",border:"1px solid #E2E8F0",borderTop:"none",borderRadius:"0 0 6px 6px"}}>
+                                {/* Sede */}
+                                <div style={{marginBottom:6}}>
+                                  <div style={{fontSize:10,fontWeight:700,color:"#64748B",marginBottom:3}}>SEDE / GRUPO</div>
+                                  <div style={{display:"flex",flexWrap:"wrap",gap:3,maxHeight:60,overflowY:"auto"}}>
+                                    {quickAddFilterOptions.sedes.slice(0,30).map(s=>{
+                                      const on=f.sede.includes(s);
+                                      return (
+                                        <button key={s} onClick={()=>{
+                                          setQuickAdd(p=>({...p, filters:{...p.filters, sede: on?p.filters.sede.filter(x=>x!==s):[...p.filters.sede,s]}}));
+                                        }} style={{padding:"2px 7px",borderRadius:99,fontSize:10,border:`1px solid ${on?BRAND.primary:"#CBD5E1"}`,background:on?BRAND.primary:"#fff",color:on?"#fff":"#334155",cursor:"pointer",fontFamily:"inherit",fontWeight:on?700:500,whiteSpace:"nowrap"}}>
+                                          {s}
+                                        </button>
+                                      );
+                                    })}
+                                    {quickAddFilterOptions.sedes.length===0 && <span style={{fontSize:10,color:"#94A3B8"}}>Sin sedes</span>}
+                                  </div>
+                                </div>
+                                {/* Cargo */}
+                                {quickAddFilterOptions.cargos.length>0 && (
+                                  <div style={{marginBottom:6}}>
+                                    <div style={{fontSize:10,fontWeight:700,color:"#64748B",marginBottom:3}}>CARGO</div>
+                                    <div style={{display:"flex",flexWrap:"wrap",gap:3,maxHeight:60,overflowY:"auto"}}>
+                                      {quickAddFilterOptions.cargos.slice(0,30).map(c=>{
+                                        const on=f.cargo.includes(c);
+                                        return (
+                                          <button key={c} onClick={()=>{
+                                            setQuickAdd(p=>({...p, filters:{...p.filters, cargo: on?p.filters.cargo.filter(x=>x!==c):[...p.filters.cargo,c]}}));
+                                          }} style={{padding:"2px 7px",borderRadius:99,fontSize:10,border:`1px solid ${on?BRAND.primary:"#CBD5E1"}`,background:on?BRAND.primary:"#fff",color:on?"#fff":"#334155",cursor:"pointer",fontFamily:"inherit",fontWeight:on?700:500,whiteSpace:"nowrap"}}>
+                                            {c}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                                {/* Depto */}
+                                {quickAddFilterOptions.depts.length>0 && (
+                                  <div>
+                                    <div style={{fontSize:10,fontWeight:700,color:"#64748B",marginBottom:3}}>DEPARTAMENTO</div>
+                                    <div style={{display:"flex",flexWrap:"wrap",gap:3,maxHeight:60,overflowY:"auto"}}>
+                                      {quickAddFilterOptions.depts.slice(0,30).map(d=>{
+                                        const on=f.dept.includes(d);
+                                        return (
+                                          <button key={d} onClick={()=>{
+                                            setQuickAdd(p=>({...p, filters:{...p.filters, dept: on?p.filters.dept.filter(x=>x!==d):[...p.filters.dept,d]}}));
+                                          }} style={{padding:"2px 7px",borderRadius:99,fontSize:10,border:`1px solid ${on?BRAND.primary:"#CBD5E1"}`,background:on?BRAND.primary:"#fff",color:on?"#fff":"#334155",cursor:"pointer",fontFamily:"inherit",fontWeight:on?700:500,whiteSpace:"nowrap"}}>
+                                            {d}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                                {totalFilters>0 && (
+                                  <button onClick={()=>setQuickAdd(p=>({...p, filters:{sede:[],cargo:[],dept:[]}}))}
+                                    style={{marginTop:6,fontSize:10,padding:"3px 8px",border:"1px solid #FCA5A5",background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                                    Limpiar filtros
+                                  </button>
+                                )}
+                              </div>
+                            </details>
+                          );
+                        })()}
+
                         <div style={{maxHeight:140,overflowY:"auto",border:"1px solid #E2E8F0",borderRadius:8,background:"#fff",marginBottom:8}}>
-                          {quickBossResults.length===0&&<div style={{padding:"10px 12px",fontSize:12,color:"#94A3B8"}}>Sin nodos en el chart aún</div>}
+                          {quickBossResults.length===0&&<div style={{padding:"10px 12px",fontSize:12,color:"#94A3B8"}}>{quickAdd.q||(quickAdd.filters?.sede.length||quickAdd.filters?.cargo.length||quickAdd.filters?.dept.length)?"Sin resultados con esos filtros":"Sin nodos en el chart aún"}</div>}
                           {quickBossResults.map(n=>{
                             const yaEs = (quickAdd.parentIds||[]).includes(n.id);
                             return(
                               <div key={n.id} onClick={()=>toggleQuickAddParent(n.id)}
                                 style={{padding:"7px 10px",cursor:"pointer",borderBottom:"1px solid #F1F5F9",background:yaEs?"#F0FDF4":"#fff",display:"flex",alignItems:"center",gap:8}}>
-                                <span style={{fontSize:13}}>{n.tipo==="grupo"?"🏢":"👤"}</span>
+                                <span style={{fontSize:13}}>{isGroupNode(n)?(n.tipo==="sector"?"🏛️":n.tipo==="cluster"?"📦":"🎋"):"👤"}</span>
                                 <div style={{flex:1,minWidth:0}}>
                                   <div style={{fontSize:12,fontWeight:600,color:"#0F172A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{n.nombre}</div>
-                                  <div style={{fontSize:10,color:"#64748B"}}>{n.cargo||""}</div>
+                                  <div style={{fontSize:10,color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{[n.cargo,n.area].filter(Boolean).join(" · ")}</div>
                                 </div>
                                 {yaEs ? <span style={{fontSize:14,color:"#15803D",fontWeight:700}}>✓</span> : <span style={{fontSize:14,color:"#CBD5E1"}}>＋</span>}
                               </div>
@@ -2497,11 +2638,30 @@ export default function App(){
                 </div>
               </div>
 
+              {/* v18: Búsqueda de personas (filtra por nombre/cargo/email) */}
+              <div style={{padding:"10px 14px",borderBottom:`1px solid ${BRAND.primary}22`,background:"#fff"}}>
+                <div style={{fontSize:10,fontWeight:700,color:BRAND.primaryDark,marginBottom:6,letterSpacing:"0.04em"}}>BUSCAR PERSONA</div>
+                <div style={{position:"relative"}}>
+                  <input
+                    value={viewFilter.personQuery||""}
+                    onChange={e=>setViewFilter(f=>({...f, personQuery:e.target.value}))}
+                    placeholder="Nombre, cargo o email…"
+                    style={{width:"100%",padding:"6px 28px 6px 10px",border:`1px solid ${viewFilter.personQuery?BRAND.primary:"#CBD5E1"}`,borderRadius:8,fontSize:12,outline:"none",fontFamily:"inherit",background:viewFilter.personQuery?BRAND.accent+"22":"#fff"}}/>
+                  {viewFilter.personQuery && (
+                    <button onClick={()=>setViewFilter(f=>({...f, personQuery:""}))}
+                      style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",color:"#64748B",fontSize:14,padding:"2px 4px",lineHeight:1}}>×</button>
+                  )}
+                </div>
+                <div style={{fontSize:10,color:"#64748B",marginTop:4,lineHeight:1.3}}>
+                  💡 Si combinas con sedes/sectores, busca solo dentro de ellos.
+                </div>
+              </div>
+
               {/* v17: 3 secciones por nivel jerárquico, consolidando por NOMBRE */}
               <div style={{padding:"10px 14px 6px",flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:10,fontWeight:700,color:BRAND.primaryDark,letterSpacing:"0.04em"}}>FILTRAR POR</div>
                 <div style={{display:"flex",gap:6}}>
-                  <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[]}))}
+                  <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[], personQuery:""}))}
                     style={{fontSize:10,padding:"2px 6px",border:`1px solid #CBD5E1`,background:"#fff",color:"#64748B",borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Limpiar</button>
                 </div>
               </div>
@@ -2580,7 +2740,7 @@ export default function App(){
               {/* Footer: contador total y limpiar */}
               <div style={{padding:"10px 14px",borderTop:`1px solid ${BRAND.primary}22`,background:"#F8FAFC",display:"flex",gap:6,alignItems:"center",justifyContent:"space-between",flexShrink:0,flexWrap:"wrap"}}>
                 {(()=>{
-                  const total = (viewFilter.sectores?.length||0) + (viewFilter.clusters?.length||0) + (viewFilter.sedes?.length||0);
+                  const total = (viewFilter.sectores?.length||0) + (viewFilter.clusters?.length||0) + (viewFilter.sedes?.length||0) + (viewFilter.personQuery ? 1 : 0);
                   return (
                     <>
                       <div style={{display:"flex",flexDirection:"column",gap:2,flex:1,minWidth:0}}>
@@ -2608,7 +2768,7 @@ export default function App(){
                           </button>
                         )}
                         {total>0 && (
-                          <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[]}))}
+                          <button onClick={()=>setViewFilter(f=>({...f, sectores:[], clusters:[], sedes:[], personQuery:""}))}
                             style={{fontSize:11,padding:"4px 10px",border:`1px solid #FCA5A5`,background:"#FEF2F2",color:"#B91C1C",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
                             Limpiar
                           </button>
@@ -2675,7 +2835,14 @@ export default function App(){
                 /* v11: render de la CAJA-LISTA si es representante */
                 if(esRep){
                   const grupo = autoGroups[gkey];
-                  const miembros = grupo.members.map(mid=>nodes.find(x=>x.id===mid)).filter(Boolean);
+                  const miembros = grupo.members.map(mid=>nodes.find(x=>x.id===mid)).filter(Boolean)
+                    .sort((a,b)=>{
+                      /* v18.1: ordenar por cargo alfabético, luego por nombre */
+                      const ca = (a.cargo||"").toLowerCase();
+                      const cb = (b.cargo||"").toLowerCase();
+                      if(ca !== cb) return ca.localeCompare(cb);
+                      return (a.nombre||"").localeCompare(b.nombre||"");
+                    });
                   const boxH = listBoxHeight(miembros.length);
                   return(
                     <div key={n.id} className="on"

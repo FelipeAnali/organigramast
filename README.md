@@ -1,45 +1,26 @@
-# Organigramast v17.4 — Fix de filtro a través de personas + debug
+# Organigramast v18.1 — 3 fixes pedidos
 
-## Fix
-**El problema**: la jerarquía real tiene PERSONAS (jefes de operaciones) entre grupos:
-```
-Supertiendas Cañaveral (raíz)
-  └── CH, SJ (personas - jefes de operaciones)
-        └── Sectores → Clusters → Sedes → Admins
-```
+## 1. Panel "Agregar" ahora ocupa toda la pantalla
+Antes el contenedor tenía `height:660px` fijo, por eso se veía comprimido.
+Cambiado a `height:100vh` con `minHeight:560` para que aproveche todo el alto de la ventana.
 
-La función anterior `checkAncestorsForLevel` recorría padres uno por uno y se detenía
-en cuanto encontraba un nodo del tipo buscado o sin más padres. Pero el problema es
-que al filtrar "Market" (clúster), buscar el ancestro "sector" funciona porque pasa por
-la persona y sube — eso debería estar OK.
+## 2. Caja-lista activada desde 2+ subordinados
+Antes el mínimo era 3 (`MIN_GROUP_SIZE = 3`). Ahora es 2.
+Esto significa que si 2 personas tienen exactamente el mismo jefe (y ese jefe es persona,
+no sede/grupo), se consolidan en caja-lista en vez de mostrarse como tarjetas grandes
+separadas.
 
-Pero pude haber tenido un bug sutil. La nueva versión:
-- Usa una función `findAncestorOfType` que SIEMPRE sigue subiendo sin importar el tipo
-  intermedio, hasta encontrar el ancestro del tipo buscado o llegar a la raíz
-- Permite que las personas (jefes de operaciones) entre grupos no rompan la cadena
+Como en tu screenshot: Ocoro Rivas Nasly Fernanda + Alegria Paz Carlos Humberto bajo
+Sánchez Osorno → ahora aparecerán como caja-lista, igual que los listados de Murillo
+Castro Jorge, García Romero Carlos, etc.
 
-## Botón de debug 🐛
-Ahora hay un botón en el footer del filtro que activa logging en la consola del navegador.
+## 3. Caja-lista ordenada por cargo alfabético
+Dentro de cada caja-lista, los miembros (supervisores de cajas, supervisor de piso, etc.)
+ahora se ordenan así:
+- 1° por **cargo alfabético** (ej: SUPERVISOR DE CAJAS antes que SUPERVISOR DE PISO)
+- 2° dentro del mismo cargo, por **nombre alfabético**
 
-**Cómo usarlo**:
-1. Abre el panel del filtro
-2. Marca alguna sede/cluster/sector
-3. Aprieta el botón 🐛 (un alert te dice "Debug ACTIVADO")
-4. Abre la consola del navegador (F12 → Console)
-5. Toca cualquier checkbox del filtro y verás en consola:
-   - Qué filtros están activos
-   - Cuáles son los SEEDS (nodos que coincidieron)
-   - Cuántos nodos quedan visibles al final
-
-Esto te permite mandarme el log para diagnosticar exactamente el problema.
-
-## Etiqueta visible: **v17.4**
-
-## Por favor prueba:
-1. Marca "Market" en clúster
-2. Apunta cuántos nodos dice "Mostrando X de Y" en el footer
-3. Activa 🐛 y vuelve a marcar/desmarcar Market
-4. Pasame el log de consola (F12) o un screenshot
+## Etiqueta visible: **v18.1**
 
 ## Archivos
 - `index.html`, `App.jsx`
