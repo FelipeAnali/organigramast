@@ -1,4 +1,12 @@
-# Organigramast v18.2 — Admins se actualizan solos
+# Organigramast v18.3 — Admins se actualizan solos
+
+## v18.3 (corrección)
+- Al actualizar el maestro, las personas se reconocen por **ID** y, si el ID no coincide,
+  por **nombre** (aunque venga en orden apellidos/nombres distinto). Antes, si los IDs no
+  coincidían, todos aparecían como nuevos y los admins se tomaban como retirados.
+- Protección: si no se reconoce al menos el 70% de la gente activa, **no se saca a nadie** y se avisa.
+- Diferencias solo de orden en el nombre ya no aparecen como conflicto.
+
 
 ## Qué cambia
 Al usar **Actualizar maestro**, los administradores de sede se sincronizan automáticamente
@@ -18,7 +26,7 @@ Protección: si el archivo nuevo trae menos de la mitad de la gente activa, no s
 
 Las demás personas (no admins) siguen funcionando igual que antes (modal de diferencias).
 
-## Etiqueta visible: **v18.2**
+## Etiqueta visible: **v18.3**
 
 ## Archivos
 - `index.html` (compilado desde `App.jsx`), `App.jsx`

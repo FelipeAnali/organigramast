@@ -951,7 +951,7 @@ export default function App(){
     const get=(row,k)=>colMap[k]?(row[colMap[k]]||"").toString().trim():"";
     let rows=impRows;
     if(filterOn&&colMap.fechaRetiro) rows=rows.filter(r=>!hasVal(r[colMap.fechaRetiro]));
-    const newRoster=rows.map((row,i)=>{
+    let newRoster=rows.map((row,i)=>{
       const nombre=get(row,"nombre"); if(!nombre)return null;
       const emailRaw=row["Email del contacto"]||row["Email"]||row["email"]||"";
       /* v12.5: reconocer columna 'retirado' al re-importar */
@@ -976,6 +976,35 @@ export default function App(){
       return;
     }
 
+    /* v18.3: emparejar el maestro nuevo con el roster actual.
+       1° por ID (tolerando ceros a la izquierda / ".0" de Excel), 2° por NOMBRE (en cualquier orden
+       de nombres/apellidos, solo si el nombre es único en ambos lados). Así, si el ID del maestro no
+       coincide con el de la memoria, la persona igual se reconoce y no se toma como nueva ni retirada. */
+    const idKey=v=>String(v??"").trim().replace(/\.0+$/,"").replace(/^0+(?=\d)/,"");
+    const nameKey=s=>normTxt(s).split(" ").filter(Boolean).sort().join(" ");
+    const oldByIdKey={}; roster.forEach(o=>{ oldByIdKey[idKey(o.id)]=o; });
+    const oldNameCount={}, oldByName={};
+    roster.forEach(o=>{ const k=nameKey(o.nombre); if(!k) return; oldNameCount[k]=(oldNameCount[k]||0)+1; oldByName[k]=o; });
+    const newNameCount={}; newRoster.forEach(n=>{ const k=nameKey(n.nombre); newNameCount[k]=(newNameCount[k]||0)+1; });
+    const usados=new Set();
+    let porId=0, porNombre=0;
+    newRoster=newRoster.map(nw=>{
+      const o=oldByIdKey[idKey(nw.id)];
+      if(o && !usados.has(o.id)){ usados.add(o.id); porId++; return o.id===nw.id?nw:{...nw,id:o.id}; }
+      return nw;
+    }).map(nw=>{
+      if(usados.has(nw.id)) return nw;
+      const k=nameKey(nw.nombre);
+      const o=oldByName[k];
+      if(o && oldNameCount[k]===1 && newNameCount[k]===1 && !usados.has(o.id)){ usados.add(o.id); porNombre++; return {...nw,id:o.id}; }
+      return nw;
+    });
+    const activosPrevios=roster.filter(r=>!r.retirado).length;
+    const reconocidos=porId+porNombre;
+    /* protección: si no reconocemos al menos 70% de la gente activa (otro archivo, columnas mal
+       mapeadas...), no se saca a NADIE del organigrama */
+    const emparejoBien = activosPrevios===0 || reconocidos >= activosPrevios*0.7;
+
     /* Reimport: calcular conflictos vs roster actual */
     const newById=Object.fromEntries(newRoster.map(r=>[r.id,r]));
     const conf=[];
@@ -986,9 +1015,8 @@ export default function App(){
     /* v18.2: sincronizar admins automáticamente (antes de calcular conflictos) */
     let sync=null;
     if(autoSyncAdmins){
-      const activosPrevios=roster.filter(r=>!r.retirado).length;
-      /* protección: si el archivo nuevo trae menos de la mitad de la gente, no sacamos a nadie */
-      const allowRemove = newRoster.length >= activosPrevios*0.5;
+      /* protección: si el archivo trae menos de la mitad de la gente o no se reconoce a la mayoría, no sacamos a nadie */
+      const allowRemove = emparejoBien && newRoster.length >= activosPrevios*0.5;
       sync=syncAdmins(nodes, newRoster, Object.fromEntries(roster.map(r=>[r.id,r])), allowRemove);
       setNodes(sync.nodes);
     }
@@ -1009,7 +1037,10 @@ export default function App(){
       fields.forEach(f=>{
         const a=(old[f]||"").toString().trim();
         const b=(nw[f]||"").toString().trim();
-        if(a!==b) diffs[f]={old:a,nuevo:b};
+        if(a===b) return;
+        /* v18.3: mismo nombre en otro orden (apellidos/nombres) o tildes → no es un cambio real */
+        if(f==="nombre" && nameKey(a)===nameKey(b)) return;
+        diffs[f]={old:a,nuevo:b};
       });
       if(Object.keys(diffs).length===0){ mergedRoster.push(old); return; }
       conf.push({id:old.id,nombre:old.nombre,enChart:inChart.has(old.id),diffs,resolucion:{}});
@@ -1022,8 +1053,8 @@ export default function App(){
     setImpRows([]); setImpHdrs([]);
 
     const L=sync?.log;
-    const huboSync = L && (L.nuevos.length||L.movidos.length||L.salientes.length||L.actualizados.length||L.sinSede.length);
-    if(huboSync) setSyncReport({...L, total:newRoster.length, nuevosRoster:nuevos});
+    const huboSync = L && (L.nuevos.length||L.movidos.length||L.salientes.length||L.actualizados.length||L.sinSede.length||!emparejoBien);
+    if(huboSync) setSyncReport({...L, total:newRoster.length, nuevosRoster:nuevos, reconocidos, porNombre, activosPrevios, emparejoBien});
 
     if(conf.length===0){
       setPanel(null);
@@ -1974,7 +2005,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.2</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.3</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -3336,10 +3367,15 @@ export default function App(){
               <span style={{fontSize:22}}>🔄</span>
               <div style={{flex:1}}>
                 <div style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Maestro actualizado — admins sincronizados</div>
-                <div style={{fontSize:12,color:"#64748B",marginTop:2}}>{syncReport.total} registros procesados{syncReport.nuevosRoster>0?` · ${syncReport.nuevosRoster} nuevos en el roster`:""}</div>
+                <div style={{fontSize:12,color:"#64748B",marginTop:2}}>{syncReport.total} registros procesados · {syncReport.reconocidos} reconocidos{syncReport.porNombre>0?` (${syncReport.porNombre} por nombre)`:""}{syncReport.nuevosRoster>0?` · ${syncReport.nuevosRoster} nuevos en el roster`:""}</div>
               </div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"12px 20px",fontSize:12,color:"#334155",lineHeight:1.6}}>
+              {!syncReport.emparejoBien && (
+                <div style={{padding:10,marginBottom:12,background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:8,color:"#92400E"}}>
+                  <strong>⚠️ No saqué a nadie del organigrama.</strong> Solo reconocí a {syncReport.reconocidos} de {syncReport.activosPrevios} personas de tu memoria, así que el archivo o las columnas (ID / Nombre) parecen no coincidir. Revisa el mapeo de columnas.
+                </div>
+              )}
               {[
                 {k:"nuevos",t:"➕ Admins agregados",c:"#15803D",f:x=>`${x.nombre} → ${x.sede}`},
                 {k:"movidos",t:"↔️ Admins que cambiaron de sede",c:"#1E40AF",f:x=>`${x.nombre}: ${x.de} → ${x.a}`},
