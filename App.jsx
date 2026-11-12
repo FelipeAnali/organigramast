@@ -231,6 +231,7 @@ function syncAdmins(nodes, newRoster, rosterById, allowRemove){
   const newById = Object.fromEntries(newRoster.filter(r=>!r.retirado).map(r=>[r.id,r]));
   const inChartIds = new Set(nodes.map(n=>n.id));
   const removed = {};           /* idSaliente -> idSede */
+  const moved = {};             /* v18.6: idAdminMovido -> {de: idSedeVieja, aKey: sede nueva normalizada} */
   const adminsPorSede = {};     /* idSede -> [ids de admins que quedan/entran] */
   const pushSede = (sid,id)=>{ (adminsPorSede[sid] = adminsPorSede[sid]||[]).push(id); };
 
@@ -262,6 +263,7 @@ function syncAdmins(nodes, newRoster, rosterById, allowRemove){
       delete upd.parentId; delete upd.parentIds;
       if(nuevosPs.length===1) upd.parentId=nuevosPs[0]; else upd.parentIds=nuevosPs;
       log.movidos.push({nombre:n.nombre, de:nodes.find(g=>g.id===sedePs[0])?.nombre||"", a:destino.nombre});
+      moved[n.id]={de:sedePs[0], aKey:normTxt(nw.area)};
       pushSede(destino.id, n.id);
     } else {
       if(!destino && nw.area && normTxt(nw.area)!==normTxt(n.area)) log.sinSede.push({nombre:n.nombre, sede:nw.area});
@@ -291,15 +293,29 @@ function syncAdmins(nodes, newRoster, rosterById, allowRemove){
     Object.keys(removed).forEach(id=>{ handled.delete(id); delete removed[id]; });
   }
 
-  /* 3. sacar a los salientes y pasar su gente al reemplazo */
-  if(Object.keys(removed).length){
+  /* 3. sacar a los salientes y pasar su gente al reemplazo.
+     v18.6: cuando un admin CAMBIA de sede, su equipo SE QUEDA en la sede vieja (con los otros
+     admins de esa sede, o colgando de la sede si no queda ninguno). Solo se va con él quien
+     también aparezca en el maestro en la sede nueva. */
+  const sueltaDe = (n,p)=>{
+    if(removed[p]) return removed[p];
+    if(moved[p] && normTxt(n.area)!==moved[p].aKey) return moved[p].de;
+    return null;
+  };
+  if(Object.keys(removed).length || Object.keys(moved).length){
+    const areaActual = Object.fromEntries(newRoster.map(r=>[r.id,r.area]));
     out = out.filter(n=>!removed[n.id]).map(n=>{
+      const nn = areaActual[n.id]!==undefined ? {...n, area:areaActual[n.id]} : n;
       const ps = parentsOf(n);
-      if(!ps.some(p=>removed[p])) return n;
+      if(!ps.some(p=>sueltaDe(nn,p))) return n;
+      const quedan = ps.filter(p=>!sueltaDe(nn,p));
       const nuevosPs = [...new Set(ps.flatMap(p=>{
-        if(!removed[p]) return [p];
-        const reemplazo = (adminsPorSede[removed[p]]||[]).filter(id=>id!==n.id);
-        return reemplazo.length ? reemplazo : [removed[p]];
+        const sedeVieja = sueltaDe(nn,p);
+        if(!sedeVieja) return [p];
+        const reemplazo = (adminsPorSede[sedeVieja]||[]).filter(id=>id!==n.id && id!==p && !moved[id]);
+        if(reemplazo.length) return reemplazo;
+        /* sin otro admin en la sede: si aún tiene otros jefes, basta con quitar este; si no, cuelga de la sede */
+        return quedan.length ? [] : [sedeVieja];
       }))];
       const upd = {...n}; delete upd.parentId; delete upd.parentIds;
       if(nuevosPs.length===1) upd.parentId=nuevosPs[0]; else upd.parentIds=nuevosPs;
@@ -2040,7 +2056,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.5</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.6</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -3421,7 +3437,7 @@ export default function App(){
               )}
               {[
                 {k:"nuevos",t:"➕ Admins agregados",c:"#15803D",f:x=>`${x.nombre} → ${x.sede}`},
-                {k:"movidos",t:"↔️ Admins que cambiaron de sede",c:"#1E40AF",f:x=>`${x.nombre}: ${x.de} → ${x.a}`},
+                {k:"movidos",t:"↔️ Admins que cambiaron de sede",c:"#1E40AF",f:x=>`${x.nombre}: ${x.de} → ${x.a} (su equipo se queda en ${x.de})`},
                 {k:"salientes",t:"➖ Admins retirados del organigrama",c:"#DC2626",f:x=>`${x.nombre} (${x.motivo})`},
                 {k:"actualizados",t:"✏️ Datos actualizados (cargo, sede, depto o email)",c:"#475569",f:x=>x},
                 {k:"sinSede",t:"⚠️ Sin sede en el organigrama (agrégalos a mano o crea la sede)",c:"#B45309",f:x=>`${x.nombre} — ${x.sede}`},

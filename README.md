@@ -1,4 +1,9 @@
-# Organigramast v18.5 — Admins se actualizan solos
+# Organigramast v18.6 — Admins se actualizan solos
+
+## v18.6
+- Cuando un admin cambia de sede, **su equipo se queda en la sede vieja** (con los otros admins
+  de esa sede, o colgando de la sede). Antes se lo llevaba y las cajas de subordinados se montaban.
+
 
 ## v18.5
 - Detección de columnas corregida para el maestro de nómina (NomProConContratosGrid):
@@ -39,7 +44,7 @@ Protección: si el archivo nuevo trae menos de la mitad de la gente activa, no s
 
 Las demás personas (no admins) siguen funcionando igual que antes (modal de diferencias).
 
-## Etiqueta visible: **v18.5**
+## Etiqueta visible: **v18.6**
 
 ## Archivos
 - `index.html` (compilado desde `App.jsx`), `App.jsx`
