@@ -1,26 +1,24 @@
-# Organigramast v18.1 — 3 fixes pedidos
+# Organigramast v18.2 — Admins se actualizan solos
 
-## 1. Panel "Agregar" ahora ocupa toda la pantalla
-Antes el contenedor tenía `height:660px` fijo, por eso se veía comprimido.
-Cambiado a `height:100vh` con `minHeight:560` para que aproveche todo el alto de la ventana.
+## Qué cambia
+Al usar **Actualizar maestro**, los administradores de sede se sincronizan automáticamente
+(interruptor "🔄 Actualizar admins solos", activado por defecto):
 
-## 2. Caja-lista activada desde 2+ subordinados
-Antes el mínimo era 3 (`MIN_GROUP_SIZE = 3`). Ahora es 2.
-Esto significa que si 2 personas tienen exactamente el mismo jefe (y ese jefe es persona,
-no sede/grupo), se consolidan en caja-lista en vez de mostrarse como tarjetas grandes
-separadas.
+- **Admin nuevo** en el maestro → se agrega solo debajo de su sede (según la columna Área/Sede).
+- **Admin que cambió de sede** → se mueve a la sede nueva (conserva foto y otros jefes).
+- **Admin que ya no está en el maestro, quedó retirado o cambió a un cargo que no es admin** →
+  sale del organigrama y su equipo pasa al admin nuevo de esa sede (o a la sede si no hay reemplazo).
+- **Cargo / sede / depto / email** de los admins se toman del maestro sin preguntar
+  (el nombre no se toca, para respetar el formato de nombres elegido).
+- Al final aparece un **resumen** con lo agregado, movido, retirado y los admins cuya sede
+  no existe en el organigrama (esos sí se agregan a mano o creando la sede).
 
-Como en tu screenshot: Ocoro Rivas Nasly Fernanda + Alegria Paz Carlos Humberto bajo
-Sánchez Osorno → ahora aparecerán como caja-lista, igual que los listados de Murillo
-Castro Jorge, García Romero Carlos, etc.
+Se considera "admin" a toda persona con **ADMIN** en el cargo que cuelga de un nodo de sede.
+Protección: si el archivo nuevo trae menos de la mitad de la gente activa, no se saca a nadie.
 
-## 3. Caja-lista ordenada por cargo alfabético
-Dentro de cada caja-lista, los miembros (supervisores de cajas, supervisor de piso, etc.)
-ahora se ordenan así:
-- 1° por **cargo alfabético** (ej: SUPERVISOR DE CAJAS antes que SUPERVISOR DE PISO)
-- 2° dentro del mismo cargo, por **nombre alfabético**
+Las demás personas (no admins) siguen funcionando igual que antes (modal de diferencias).
 
-## Etiqueta visible: **v18.1**
+## Etiqueta visible: **v18.2**
 
 ## Archivos
-- `index.html`, `App.jsx`
+- `index.html` (compilado desde `App.jsx`), `App.jsx`

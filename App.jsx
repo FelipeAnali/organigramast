@@ -202,6 +202,102 @@ function adminLevelOf(n){
   return 99;
 }
 
+/* v18.2: AUTO-SINCRONIZACIÓN DE ADMINS al actualizar el maestro.
+   Un "admin" es una persona con ADMIN en el cargo que cuelga de una sede (nodo tipo "grupo").
+   La sede se empareja con la columna Área/Sede del maestro (por sourceVal o por nombre del nodo).
+   Reglas:
+   - Admin nuevo en el maestro cuya sede existe en el chart → se agrega bajo esa sede.
+   - Admin que cambió de sede → se mueve a la sede nueva (conserva sus otros jefes y su foto).
+   - Admin que ya no está en el maestro, quedó retirado o ya no es admin → sale del chart;
+     su gente pasa al admin nuevo de esa misma sede (o a la sede si no hay reemplazo).
+   - Cargo / sede / depto / email de los admins se actualizan desde el maestro sin preguntar
+     (el nombre NO se toca, para respetar el formato que hayas elegido). */
+const normTxt = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim();
+const isAdminCargo = c => normTxt(c).includes("ADMIN");
+
+function syncAdmins(nodes, newRoster, rosterById, allowRemove){
+  const log = { nuevos:[], movidos:[], salientes:[], actualizados:[], sinSede:[] };
+  const sedeByKey = {};
+  const sedeIds = new Set();
+  nodes.forEach(g=>{
+    if(g.tipo!=="grupo") return;
+    sedeIds.add(g.id);
+    [g.sourceVal, g.nombre].forEach(v=>{ const k=normTxt(v); if(k && !sedeByKey[k]) sedeByKey[k]=g; });
+  });
+  const handled = new Set(); /* ids de admins que esta función ya sincronizó (no van al modal de conflictos) */
+  if(sedeIds.size===0) return { nodes, log, handled, removedIds:[] };
+
+  const newById = Object.fromEntries(newRoster.filter(r=>!r.retirado).map(r=>[r.id,r]));
+  const inChartIds = new Set(nodes.map(n=>n.id));
+  const removed = {};           /* idSaliente -> idSede */
+  const adminsPorSede = {};     /* idSede -> [ids de admins que quedan/entran] */
+  const pushSede = (sid,id)=>{ (adminsPorSede[sid] = adminsPorSede[sid]||[]).push(id); };
+
+  /* 1. admins que ya están en el chart colgando de una sede */
+  let out = nodes.map(n=>{
+    if(n.tipo!=="persona") return n;
+    const ps = parentsOf(n);
+    const sedePs = ps.filter(p=>sedeIds.has(p));
+    if(!sedePs.length) return n;
+    const nw = newById[n.id];
+    const eraAdmin = isAdminCargo(n.cargo);
+    if(!nw){
+      if(eraAdmin && allowRemove){ removed[n.id]=sedePs[0]; log.salientes.push({nombre:n.nombre, motivo:"ya no está activo en el maestro"}); handled.add(n.id); }
+      return n;
+    }
+    if(!eraAdmin && !isAdminCargo(nw.cargo)) return n; /* no es admin: no lo tocamos */
+    handled.add(n.id);
+    if(eraAdmin && !isAdminCargo(nw.cargo)){
+      removed[n.id]=sedePs[0];
+      log.salientes.push({nombre:n.nombre, motivo:`ahora es ${nw.cargo||"otro cargo"}`});
+      return n;
+    }
+    const upd = {...n, cargo:nw.cargo, area:nw.area, dept:nw.dept, email:nw.email||n.email||""};
+    if(["cargo","area","dept","email"].some(f=>(n[f]||"")!==(upd[f]||""))) log.actualizados.push(n.nombre);
+    const destino = sedeByKey[normTxt(nw.area)];
+    if(destino && !sedePs.includes(destino.id)){
+      const nuevosPs = [...new Set(ps.map(p=>p===sedePs[0]?destino.id:p))];
+      delete upd.parentId; delete upd.parentIds;
+      if(nuevosPs.length===1) upd.parentId=nuevosPs[0]; else upd.parentIds=nuevosPs;
+      log.movidos.push({nombre:n.nombre, de:nodes.find(g=>g.id===sedePs[0])?.nombre||"", a:destino.nombre});
+      pushSede(destino.id, n.id);
+    } else {
+      if(!destino && nw.area && normTxt(nw.area)!==normTxt(n.area)) log.sinSede.push({nombre:n.nombre, sede:nw.area});
+      pushSede(sedePs[0], n.id);
+    }
+    return upd;
+  });
+
+  /* 2. admins nuevos en el maestro (no están en el chart) */
+  newRoster.forEach(nw=>{
+    if(nw.retirado || inChartIds.has(nw.id) || !isAdminCargo(nw.cargo)) return;
+    const sede = sedeByKey[normTxt(nw.area)];
+    if(!sede){ if(nw.area) log.sinSede.push({nombre:nw.nombre, sede:nw.area}); return; }
+    const base = rosterById[nw.id] || nw; /* usa el nombre del roster si ya existía (formato elegido) */
+    out.push({...base, cargo:nw.cargo, area:nw.area, dept:nw.dept, email:nw.email||base.email||"", tipo:"persona", parentId:sede.id});
+    log.nuevos.push({nombre:base.nombre, sede:sede.nombre});
+    handled.add(nw.id);
+    pushSede(sede.id, nw.id);
+  });
+
+  /* 3. sacar a los salientes y pasar su gente al reemplazo */
+  if(Object.keys(removed).length){
+    out = out.filter(n=>!removed[n.id]).map(n=>{
+      const ps = parentsOf(n);
+      if(!ps.some(p=>removed[p])) return n;
+      const nuevosPs = [...new Set(ps.flatMap(p=>{
+        if(!removed[p]) return [p];
+        const reemplazo = (adminsPorSede[removed[p]]||[]).filter(id=>id!==n.id);
+        return reemplazo.length ? reemplazo : [removed[p]];
+      }))];
+      const upd = {...n}; delete upd.parentId; delete upd.parentIds;
+      if(nuevosPs.length===1) upd.parentId=nuevosPs[0]; else upd.parentIds=nuevosPs;
+      return upd;
+    });
+  }
+  return { nodes: out, log, handled, removedIds: Object.keys(removed) };
+}
+
 function buildLayout(nodes, compactSet, autoGroups){
   compactSet = compactSet || new Set();
   autoGroups = autoGroups || {};
@@ -532,6 +628,9 @@ export default function App(){
   /* ── v5: reimport con diff ── */
   const [impMode, setImpMode] = useState("initial"); // "initial" | "reimport"
   const [conflicts, setConflicts] = useState([]);
+  /* v18.2: auto-sincronización de admins al actualizar el maestro */
+  const [autoSyncAdmins, setAutoSyncAdmins] = useState(true);
+  const [syncReport, setSyncReport] = useState(null);
 
 
   /* ── Cargar libs PDF dinámicamente ── */
@@ -884,10 +983,28 @@ export default function App(){
     const seenIds=new Set();
     const fields=["nombre","cargo","area","dept","email"];
 
+    /* v18.2: sincronizar admins automáticamente (antes de calcular conflictos) */
+    let sync=null;
+    if(autoSyncAdmins){
+      const activosPrevios=roster.filter(r=>!r.retirado).length;
+      /* protección: si el archivo nuevo trae menos de la mitad de la gente, no sacamos a nadie */
+      const allowRemove = newRoster.length >= activosPrevios*0.5;
+      sync=syncAdmins(nodes, newRoster, Object.fromEntries(roster.map(r=>[r.id,r])), allowRemove);
+      setNodes(sync.nodes);
+    }
+    const handled = sync?.handled || new Set();
+    const salientes = new Set(sync?.removedIds||[]);
+
     roster.forEach(old=>{
       const nw=newById[old.id];
       seenIds.add(old.id);
+      if(salientes.has(old.id) && !nw){ mergedRoster.push({...old, retirado:true}); return; }
       if(!nw){ mergedRoster.push(old); return; }
+      if(handled.has(old.id)){
+        /* admin sincronizado: el maestro manda en cargo/sede/depto/email, el nombre se conserva */
+        mergedRoster.push({...old, cargo:nw.cargo, area:nw.area, dept:nw.dept, email:nw.email||old.email||"", ...(nw.retirado?{retirado:true}:{})});
+        return;
+      }
       const diffs={};
       fields.forEach(f=>{
         const a=(old[f]||"").toString().trim();
@@ -904,9 +1021,13 @@ export default function App(){
     setRoster(mergedRoster);
     setImpRows([]); setImpHdrs([]);
 
+    const L=sync?.log;
+    const huboSync = L && (L.nuevos.length||L.movidos.length||L.salientes.length||L.actualizados.length||L.sinSede.length);
+    if(huboSync) setSyncReport({...L, total:newRoster.length, nuevosRoster:nuevos});
+
     if(conf.length===0){
       setPanel(null);
-      alert(`Maestro actualizado. ${newRoster.length} registros procesados. ${nuevos>0?nuevos+" empleados nuevos agregados al roster. ":""}Sin conflictos.`);
+      if(!huboSync) alert(`Maestro actualizado. ${newRoster.length} registros procesados. ${nuevos>0?nuevos+" empleados nuevos agregados al roster. ":""}Sin conflictos.`);
     } else {
       setConflicts(conf);
       setPanel("diff");
@@ -1853,7 +1974,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.1</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.2</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -1932,6 +2053,17 @@ export default function App(){
             {impMode==="reimport" && (
               <div style={{padding:10,background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:8,fontSize:12,color:"#1E40AF",marginBottom:14,lineHeight:1.5}}>
                 <strong>Modo actualización:</strong> personas se identifican por ID. Si hay diferencias te preguntaré qué conservar.
+              </div>
+            )}
+            {impMode==="reimport" && (
+              <div style={{padding:10,background:"#F0FDF4",border:"1px solid #86EFAC",borderRadius:8,fontSize:12,color:"#15803D",marginBottom:14,lineHeight:1.5}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{flex:1,fontWeight:700}}>🔄 Actualizar admins solos</div>
+                  <div onClick={()=>setAutoSyncAdmins(v=>!v)} style={{width:36,height:20,borderRadius:10,background:autoSyncAdmins?"#22C55E":"#CBD5E1",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+                    <div style={{width:14,height:14,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:autoSyncAdmins?19:3,transition:"left .2s"}}/>
+                  </div>
+                </div>
+                {autoSyncAdmins && <div style={{marginTop:4,fontSize:11}}>Admins nuevos entran a su sede, los que cambiaron de sede se mueven y los que salieron se quitan (su equipo pasa al admin nuevo). Al final verás un resumen.</div>}
               </div>
             )}
             {[{k:"nombre",l:"Nombre *"},{k:"cargo",l:"Cargo"},{k:"area",l:"Área / Sede"},{k:"dept",l:"Departamento"},{k:"id",l:"ID único"}].map(f=>(
@@ -3195,6 +3327,39 @@ export default function App(){
           )}
         </div>
       </div>
+
+      {/* v18.2: resumen de la auto-sincronización de admins (se muestra después de resolver conflictos) */}
+      {syncReport && panel!=="diff" && (
+        <div className="modal-bg">
+          <div className="modal" style={{maxWidth:560}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid #E2E8F0",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:22}}>🔄</span>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>Maestro actualizado — admins sincronizados</div>
+                <div style={{fontSize:12,color:"#64748B",marginTop:2}}>{syncReport.total} registros procesados{syncReport.nuevosRoster>0?` · ${syncReport.nuevosRoster} nuevos en el roster`:""}</div>
+              </div>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"12px 20px",fontSize:12,color:"#334155",lineHeight:1.6}}>
+              {[
+                {k:"nuevos",t:"➕ Admins agregados",c:"#15803D",f:x=>`${x.nombre} → ${x.sede}`},
+                {k:"movidos",t:"↔️ Admins que cambiaron de sede",c:"#1E40AF",f:x=>`${x.nombre}: ${x.de} → ${x.a}`},
+                {k:"salientes",t:"➖ Admins retirados del organigrama",c:"#DC2626",f:x=>`${x.nombre} (${x.motivo})`},
+                {k:"actualizados",t:"✏️ Datos actualizados (cargo, sede, depto o email)",c:"#475569",f:x=>x},
+                {k:"sinSede",t:"⚠️ Sin sede en el organigrama (agrégalos a mano o crea la sede)",c:"#B45309",f:x=>`${x.nombre} — ${x.sede}`},
+              ].filter(s=>syncReport[s.k]?.length).map(s=>(
+                <div key={s.k} style={{marginBottom:12}}>
+                  <div style={{fontWeight:700,color:s.c,marginBottom:2}}>{s.t} ({syncReport[s.k].length})</div>
+                  <ul style={{margin:0,paddingLeft:18}}>{syncReport[s.k].map((x,i)=><li key={i}>{s.f(x)}</li>)}</ul>
+                </div>
+              ))}
+              <div style={{fontSize:11,color:"#94A3B8"}}>Recuerda descargar la memoria para guardar estos cambios.</div>
+            </div>
+            <div style={{padding:"14px 20px",borderTop:"1px solid #E2E8F0",display:"flex",justifyContent:"flex-end"}}>
+              <button className="btn p" onClick={()=>setSyncReport(null)}>Entendido</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* v5: MODAL de resolución de conflictos tras reimport */}
       {panel==="diff" && conflicts.length>0 && (
