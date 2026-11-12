@@ -1005,6 +1005,9 @@ export default function App(){
        mapeadas...), no se saca a NADIE del organigrama */
     const emparejoBien = activosPrevios===0 || reconocidos >= activosPrevios*0.7;
 
+    /* v18.4: copia de seguridad para poder DESHACER la actualización completa */
+    const respaldo={roster, nodes};
+
     /* Reimport: calcular conflictos vs roster actual */
     const newById=Object.fromEntries(newRoster.map(r=>[r.id,r]));
     const conf=[];
@@ -1054,7 +1057,7 @@ export default function App(){
 
     const L=sync?.log;
     const huboSync = L && (L.nuevos.length||L.movidos.length||L.salientes.length||L.actualizados.length||L.sinSede.length||!emparejoBien);
-    if(huboSync) setSyncReport({...L, total:newRoster.length, nuevosRoster:nuevos, reconocidos, porNombre, activosPrevios, emparejoBien});
+    if(huboSync) setSyncReport({...L, respaldo, total:newRoster.length, nuevosRoster:nuevos, reconocidos, porNombre, activosPrevios, emparejoBien});
 
     if(conf.length===0){
       setPanel(null);
@@ -2005,7 +2008,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.3</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.4</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -3390,7 +3393,14 @@ export default function App(){
               ))}
               <div style={{fontSize:11,color:"#94A3B8"}}>Recuerda descargar la memoria para guardar estos cambios.</div>
             </div>
-            <div style={{padding:"14px 20px",borderTop:"1px solid #E2E8F0",display:"flex",justifyContent:"flex-end"}}>
+            <div style={{padding:"14px 20px",borderTop:"1px solid #E2E8F0",display:"flex",justifyContent:"space-between",gap:8}}>
+              <button className="btn" style={{borderColor:"#FCA5A5",color:"#DC2626"}}
+                title="Deja el organigrama y el roster exactamente como estaban antes de actualizar el maestro (fotos incluidas)"
+                onClick={()=>{
+                  if(!confirm("¿Deshacer la actualización del maestro?\n\nTodo vuelve a quedar como estaba antes (personas, jefes y fotos).")) return;
+                  setRoster(syncReport.respaldo.roster); setNodes(syncReport.respaldo.nodes);
+                  setConflicts([]); setSyncReport(null); setPanel(null);
+                }}>↩ Deshacer actualización</button>
               <button className="btn p" onClick={()=>setSyncReport(null)}>Entendido</button>
             </div>
           </div>

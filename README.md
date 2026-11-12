@@ -1,4 +1,8 @@
-# Organigramast v18.3 — Admins se actualizan solos
+# Organigramast v18.4 — Admins se actualizan solos
+
+## v18.4
+- Botón **↩ Deshacer actualización** en el resumen: deja todo como estaba (personas, jefes y fotos).
+- La página detecta si el navegador cargó una versión vieja desde caché y se recarga sola.
 
 ## v18.3 (corrección)
 - Al actualizar el maestro, las personas se reconocen por **ID** y, si el ID no coincide,
@@ -26,7 +30,7 @@ Protección: si el archivo nuevo trae menos de la mitad de la gente activa, no s
 
 Las demás personas (no admins) siguen funcionando igual que antes (modal de diferencias).
 
-## Etiqueta visible: **v18.3**
+## Etiqueta visible: **v18.4**
 
 ## Archivos
 - `index.html` (compilado desde `App.jsx`), `App.jsx`
