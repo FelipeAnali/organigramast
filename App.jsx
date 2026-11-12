@@ -213,10 +213,11 @@ function adminLevelOf(n){
    - Cargo / sede / depto / email de los admins se actualizan desde el maestro sin preguntar
      (el nombre NO se toca, para respetar el formato que hayas elegido). */
 const normTxt = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim();
-const isAdminCargo = c => normTxt(c).includes("ADMIN");
+const isAdminCargo = c => normTxt(c).startsWith("ADMINISTRADOR"); /* v18.5: solo ADMINISTRADOR (junior, senior, máster...). No cuenta "asistente administrativo", "jefe administrativo", etc. */
+const tieneLetras = v => /[A-Z]/.test(normTxt(v)); /* v18.5: "082" no es un cargo, es un código */
 
 function syncAdmins(nodes, newRoster, rosterById, allowRemove){
-  const log = { nuevos:[], movidos:[], salientes:[], actualizados:[], sinSede:[] };
+  const log = { nuevos:[], movidos:[], salientes:[], actualizados:[], sinSede:[], bloqueados:0 };
   const sedeByKey = {};
   const sedeIds = new Set();
   nodes.forEach(g=>{
@@ -245,6 +246,7 @@ function syncAdmins(nodes, newRoster, rosterById, allowRemove){
       if(eraAdmin && allowRemove){ removed[n.id]=sedePs[0]; log.salientes.push({nombre:n.nombre, motivo:"ya no está activo en el maestro"}); handled.add(n.id); }
       return n;
     }
+    if(!tieneLetras(nw.cargo)) return n; /* cargo vacío o código: columna mal mapeada, no tocar */
     if(!eraAdmin && !isAdminCargo(nw.cargo)) return n; /* no es admin: no lo tocamos */
     handled.add(n.id);
     if(eraAdmin && !isAdminCargo(nw.cargo)){
@@ -279,6 +281,15 @@ function syncAdmins(nodes, newRoster, rosterById, allowRemove){
     handled.add(nw.id);
     pushSede(sede.id, nw.id);
   });
+
+  /* v18.5: si se van a sacar demasiados admins de una (más de 5 y más del 20%), casi seguro
+     es un problema del archivo o de columnas → no sacar a nadie y avisar */
+  const totalAdmins = nodes.filter(n=>n.tipo==="persona" && isAdminCargo(n.cargo) && parentsOf(n).some(p=>sedeIds.has(p))).length;
+  const nRem = Object.keys(removed).length;
+  if(nRem>5 && nRem > totalAdmins*0.2){
+    log.bloqueados = nRem; log.salientes = [];
+    Object.keys(removed).forEach(id=>{ handled.delete(id); delete removed[id]; });
+  }
 
   /* 3. sacar a los salientes y pasar su gente al reemplazo */
   if(Object.keys(removed).length){
@@ -493,13 +504,20 @@ const VCOLS={
   cargo: ["descripcion del cargo","cargo","position","puesto","job title"],
   area:  ["descripcion c.o.","descripcion co","area","sede","location"],
   dept:  ["descripcion ccosto","departamento","department","dept","ccosto"],
-  id:    ["codigo unico","id","employee id","codigo"],
+  id:    ["codigo unico","empleado","cedula","documento","employee id","id","codigo"], /* v18.5: "Empleado" = cédula en el maestro de nómina */
   fechaRetiro:["fecha retiro","fecha de retiro","fecha_retiro","end date","termination date"],
 };
 function detectCols(headers){
   const cl=h=>h.toLowerCase().replace(/[^a-záéíóúñ\s.]/g,"").trim();
   const res={};
-  Object.entries(VCOLS).forEach(([key,vs])=>{ const f=headers.find(h=>vs.some(v=>cl(h).includes(cl(v)))); if(f)res[key]=f; });
+  /* v18.5: prioridad por orden de variantes y coincidencia EXACTA primero.
+     Antes "Cargo" (código 082) ganaba sobre "Descripcion del cargo" porque aparecía primero. */
+  Object.entries(VCOLS).forEach(([key,vs])=>{
+    let f=null;
+    for(const v of vs){ f=headers.find(h=>cl(h)===cl(v)); if(f) break; }
+    if(!f) for(const v of vs){ f=headers.find(h=>cl(h).includes(cl(v))); if(f) break; }
+    if(f) res[key]=f;
+  });
   return res;
 }
 
@@ -570,6 +588,8 @@ export default function App(){
   const [impRows, setImpRows] = useState([]);
   const [impHdrs, setImpHdrs] = useState([]);
   const [colMap,  setColMap]  = useState({});
+  /* v18.5: último mapeo de columnas usado (se guarda en la memoria y se reutiliza al actualizar) */
+  const [lastColMap, setLastColMap] = useState(null);
   const [impFile, setImpFile] = useState("");
   const [filterOn,setFilterOn]= useState(true);
 
@@ -940,7 +960,10 @@ export default function App(){
       }
       setImpHdrs(headers); setImpRows(rows);
       const det=detectCols(headers);
-      setColMap(det); setFilterOn(!!det.fechaRetiro);
+      /* v18.5: si el mapeo anterior sirve con este archivo, usarlo tal cual */
+      const prev = lastColMap && Object.values(lastColMap).filter(Boolean).every(h=>headers.includes(h)) ? lastColMap : null;
+      const map = prev ? {...det, ...prev} : det;
+      setColMap(map); setFilterOn(!!map.fechaRetiro);
       setPanel("colmap");
     };
     if(f.name.match(/\.(csv|txt)$/i)) r.readAsText(f); else r.readAsArrayBuffer(f);
@@ -949,6 +972,7 @@ export default function App(){
 
   const applyImport=()=>{
     const get=(row,k)=>colMap[k]?(row[colMap[k]]||"").toString().trim():"";
+    setLastColMap({...colMap});
     let rows=impRows;
     if(filterOn&&colMap.fechaRetiro) rows=rows.filter(r=>!hasVal(r[colMap.fechaRetiro]));
     let newRoster=rows.map((row,i)=>{
@@ -1014,6 +1038,7 @@ export default function App(){
     const mergedRoster=[];
     const seenIds=new Set();
     const fields=["nombre","cargo","area","dept","email"];
+    const autoRelleno={}; /* v18.5: id -> campos vacíos llenados desde el maestro */
 
     /* v18.2: sincronizar admins automáticamente (antes de calcular conflictos) */
     let sync=null;
@@ -1045,18 +1070,24 @@ export default function App(){
         if(f==="nombre" && nameKey(a)===nameKey(b)) return;
         diffs[f]={old:a,nuevo:b};
       });
-      if(Object.keys(diffs).length===0){ mergedRoster.push(old); return; }
+      /* v18.5: si lo mío está vacío y el maestro trae dato, se llena solo (no es un conflicto real) */
+      const relleno={};
+      Object.keys(diffs).forEach(f=>{ if(!diffs[f].old && diffs[f].nuevo){ relleno[f]=diffs[f].nuevo; delete diffs[f]; } });
+      if(Object.keys(relleno).length) autoRelleno[old.id]=relleno;
+      const base=Object.keys(relleno).length?{...old,...relleno}:old;
+      if(Object.keys(diffs).length===0){ mergedRoster.push(base); return; }
       conf.push({id:old.id,nombre:old.nombre,enChart:inChart.has(old.id),diffs,resolucion:{}});
-      mergedRoster.push(old); // dejamos lo viejo, se ajustará al aplicar resoluciones
+      mergedRoster.push(base); // dejamos lo viejo, se ajustará al aplicar resoluciones
     });
     newRoster.forEach(nw=>{ if(!seenIds.has(nw.id)) mergedRoster.push(nw); });
 
     const nuevos=mergedRoster.length-roster.length;
     setRoster(mergedRoster);
+    if(Object.keys(autoRelleno).length) setNodes(ns=>ns.map(n=>autoRelleno[n.id]?{...n,...autoRelleno[n.id]}:n));
     setImpRows([]); setImpHdrs([]);
 
     const L=sync?.log;
-    const huboSync = L && (L.nuevos.length||L.movidos.length||L.salientes.length||L.actualizados.length||L.sinSede.length||!emparejoBien);
+    const huboSync = L && (L.nuevos.length||L.movidos.length||L.salientes.length||L.actualizados.length||L.sinSede.length||L.bloqueados||!emparejoBien);
     if(huboSync) setSyncReport({...L, respaldo, total:newRoster.length, nuevosRoster:nuevos, reconocidos, porNombre, activosPrevios, emparejoBien});
 
     if(conf.length===0){
@@ -1297,7 +1328,7 @@ export default function App(){
   const MEM_MAGIC="CANAVERAL_ORGMEM";
   const saveMem=()=>{
     try{
-      const mem={_magic:MEM_MAGIC,_version:1,_savedAt:new Date().toISOString(),roster,nodes};
+      const mem={_magic:MEM_MAGIC,_version:1,_savedAt:new Date().toISOString(),roster,nodes,colMap:lastColMap||undefined};
       const json=JSON.stringify(mem);
       const blob=new Blob([json],{type:"application/octet-stream"});
       const url=URL.createObjectURL(blob);
@@ -1327,6 +1358,7 @@ export default function App(){
         suppressDirty.current=1; // roster + nodes se batchean en React 18, 1 efecto
         if(Array.isArray(mem.roster)) setRoster(mem.roster); else setRoster([]);
         if(Array.isArray(mem.nodes))  setNodes(mem.nodes); else setNodes([]);
+        setLastColMap(mem.colMap||null);
         setMemFileName(f.name);
         setDirty(false);
         setSel(null);
@@ -2008,7 +2040,7 @@ export default function App(){
           </div>
           <div style={{width:1,height:30,background:BRAND.primary+"33",margin:"0 4px"}}/>
           <span style={{fontWeight:700,fontSize:14,color:BRAND.primaryDark}}>Organigrama</span>
-          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.4</span>
+          <span style={{fontSize:10,fontWeight:700,color:BRAND.primary,background:BRAND.accent+"33",padding:"2px 7px",borderRadius:10}}>v18.5</span>
           {dirty && <span title="Cambios sin guardar" style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#C2410C",fontWeight:600}}><span className="dot-unsaved"/>sin guardar</span>}
           {!dirty && memFileName && <span style={{fontSize:11,color:BRAND.primary,fontWeight:600}} title={memFileName}>✓ guardado</span>}
           {roster.length>0&&<span style={{fontSize:11,padding:"2px 8px",background:BRAND.bgSoft,color:BRAND.primaryDark,borderRadius:20,fontWeight:600,border:`1px solid ${BRAND.primary}33`}}>{roster.length} en roster</span>}
@@ -2107,6 +2139,9 @@ export default function App(){
                   <option value="">— No mapear —</option>
                   {impHdrs.map(h=><option key={h} value={h}>{h}</option>)}
                 </select>
+                {colMap[f.k] && (()=>{ const ej=(impRows.find(r=>String(r[colMap[f.k]]??"").trim())||{})[colMap[f.k]];
+                  const soloNum = f.k!=="id" && ej!==undefined && !/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(String(ej));
+                  return <div style={{fontSize:11,marginTop:3,color:soloNum?"#DC2626":"#94A3B8"}}>Ej: <strong>{String(ej??"—")}</strong>{soloNum?" ⚠️ parece un código, ¿es la columna correcta?":""}</div>; })()}
               </div>
             ))}
             <div style={{marginTop:6,marginBottom:14,padding:12,background:"#F0FDF4",border:"1px solid #86EFAC",borderRadius:10}}>
@@ -3374,6 +3409,11 @@ export default function App(){
               </div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"12px 20px",fontSize:12,color:"#334155",lineHeight:1.6}}>
+              {syncReport.bloqueados>0 && (
+                <div style={{padding:10,marginBottom:12,background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:8,color:"#92400E"}}>
+                  <strong>⚠️ No saqué a nadie del organigrama.</strong> Iban a salir {syncReport.bloqueados} admins de una sola vez, y eso casi siempre es porque una columna quedó mal (por ejemplo, el cargo con código en vez de la descripción). Si de verdad salieron, quítalos a mano.
+                </div>
+              )}
               {!syncReport.emparejoBien && (
                 <div style={{padding:10,marginBottom:12,background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:8,color:"#92400E"}}>
                   <strong>⚠️ No saqué a nadie del organigrama.</strong> Solo reconocí a {syncReport.reconocidos} de {syncReport.activosPrevios} personas de tu memoria, así que el archivo o las columnas (ID / Nombre) parecen no coincidir. Revisa el mapeo de columnas.

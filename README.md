@@ -1,4 +1,13 @@
-# Organigramast v18.4 — Admins se actualizan solos
+# Organigramast v18.5 — Admins se actualizan solos
+
+## v18.5
+- Detección de columnas corregida para el maestro de nómina (NomProConContratosGrid):
+  ID = **Empleado** (cédula), cargo = **Descripcion del cargo**. Antes tomaba "Id C.O." e "Id cargo" (códigos).
+- El mapeo de columnas se guarda en la memoria y se reutiliza la próxima vez.
+- En el panel de columnas se ve un ejemplo de cada una y avisa si parece un código.
+- Admin = cargo que empieza por ADMINISTRADOR (no cuenta asistente/jefe/gerente administrativo).
+- Si van a salir muchos admins de una vez (más de 5 y más del 20%), no se saca a nadie y se avisa.
+- Datos vacíos en la memoria se llenan solos desde el maestro (no se preguntan).
 
 ## v18.4
 - Botón **↩ Deshacer actualización** en el resumen: deja todo como estaba (personas, jefes y fotos).
@@ -30,7 +39,7 @@ Protección: si el archivo nuevo trae menos de la mitad de la gente activa, no s
 
 Las demás personas (no admins) siguen funcionando igual que antes (modal de diferencias).
 
-## Etiqueta visible: **v18.4**
+## Etiqueta visible: **v18.5**
 
 ## Archivos
 - `index.html` (compilado desde `App.jsx`), `App.jsx`
